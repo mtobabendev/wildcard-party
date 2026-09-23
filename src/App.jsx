@@ -92,6 +92,25 @@ function SmartVideo({
   )
 }
 
+const PENNY_SESSION_KEY = 'wildcard-party:penny-session-v1'
+
+function loadPennyMessages() {
+  try {
+    const raw = window.sessionStorage.getItem(PENNY_SESSION_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((message) => (
+        (message?.role === 'user' || message?.role === 'assistant') &&
+        typeof message?.text === 'string'
+      ))
+      .slice(-20)
+  } catch {
+    return []
+  }
+}
+
 const seedPosts = [
   {
     id: 1,
@@ -125,12 +144,39 @@ function App() {
   const [draft, setDraft] = useState('')
   const [liked, setLiked] = useState(() => new Set())
   const [pennyOpen, setPennyOpen] = useState(false)
+  const [pennyDraft, setPennyDraft] = useState('')
+  const [pennyMessages, setPennyMessages] = useState(loadPennyMessages)
+  const [pennyBusy, setPennyBusy] = useState(false)
+  const [pennyError, setPennyError] = useState('')
+  const chatAbortRef = useRef(null)
+  const chatScrollRef = useRef(null)
   const [notice, setNotice] = useState('Penny has seized the administrator console.')
 
   const currentTitle = useMemo(
     () => navItems.find((item) => item.id === activeNav)?.label ?? 'FEED',
     [activeNav],
   )
+
+  useEffect(() => {
+    if (pennyBusy) return
+    try {
+      window.sessionStorage.setItem(
+        PENNY_SESSION_KEY,
+        JSON.stringify(pennyMessages.slice(-20).map(({ id, role, text }) => ({ id, role, text }))),
+      )
+    } catch {
+      // Session storage is optional. Penny still works without it.
+    }
+  }, [pennyBusy, pennyMessages])
+
+  useEffect(() => {
+    if (!pennyOpen || !chatScrollRef.current) return
+    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+  }, [pennyMessages, pennyOpen])
+
+  useEffect(() => () => {
+    chatAbortRef.current?.abort()
+  }, [])
 
   function publishPost() {
     const text = draft.trim()
@@ -171,6 +217,121 @@ function App() {
       rooms: 'Rooms are staged for live sessions and The Spade.',
     }
     setNotice(labels[id])
+  }
+
+  function clearPennySession() {
+    if (pennyBusy) return
+    setPennyMessages([])
+    setPennyDraft('')
+    setPennyError('')
+    try {
+      window.sessionStorage.removeItem(PENNY_SESSION_KEY)
+    } catch {
+      // Nothing else to clean up.
+    }
+  }
+
+  async function sendPennyMessage(event) {
+    event?.preventDefault()
+
+    const text = pennyDraft.trim()
+    if (!text || pennyBusy) return
+
+    const stamp = Date.now()
+    const userMessage = {
+      id: `user-${stamp}`,
+      role: 'user',
+      text,
+    }
+    const assistantId = `penny-${stamp}`
+    const outgoing = [...pennyMessages, userMessage]
+      .slice(-10)
+      .map((message) => ({ role: message.role, content: message.text }))
+
+    setPennyDraft('')
+    setPennyError('')
+    setPennyBusy(true)
+    setPennyMessages((current) => [
+      ...current,
+      userMessage,
+      { id: assistantId, role: 'assistant', text: '', pending: true },
+    ].slice(-20))
+
+    const controller = new AbortController()
+    chatAbortRef.current = controller
+
+    try {
+      const response = await fetch('/api/penny', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: outgoing }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        let message = 'Penny\'s line is unavailable right now.'
+        try {
+          const payload = await response.json()
+          if (payload?.error) message = payload.error
+        } catch {
+          // Keep the friendly fallback above.
+        }
+        throw new Error(message)
+      }
+
+      if (!response.body) {
+        throw new Error('Penny connected, but the reply stream never opened.')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let receivedText = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        if (!chunk) continue
+
+        receivedText += chunk
+        setPennyMessages((current) => current.map((message) => (
+          message.id === assistantId
+            ? { ...message, text: message.text + chunk }
+            : message
+        )))
+      }
+
+      if (!receivedText.trim()) {
+        throw new Error('Penny answered with radio silence. Try that again.')
+      }
+
+      setPennyMessages((current) => current.map((message) => (
+        message.id === assistantId
+          ? { ...message, pending: false }
+          : message
+      )))
+    } catch (error) {
+      const interrupted = error?.name === 'AbortError'
+      setPennyMessages((current) => current.map((message) => (
+        message.id === assistantId
+          ? {
+              ...message,
+              pending: false,
+              text: message.text || (interrupted
+                ? 'Transmission interrupted.'
+                : 'I lost the line before I could answer.'),
+            }
+          : message
+      )))
+      if (!interrupted) {
+        setPennyError(error?.message || 'Penny\'s line is unavailable right now.')
+      }
+    } finally {
+      if (chatAbortRef.current === controller) {
+        chatAbortRef.current = null
+      }
+      setPennyBusy(false)
+    }
   }
 
   return (
@@ -367,29 +528,85 @@ function App() {
         </div>
       </main>
 
-      <button className="penny-dock" type="button" onClick={() => setPennyOpen((open) => !open)}>
+      <button
+        className={`penny-dock ${pennyOpen ? 'penny-dock-open' : ''}`}
+        type="button"
+        onClick={() => setPennyOpen((open) => !open)}
+      >
         <span className="dock-sigil">♠</span>
-        <span><b>ASK PENNY</b><small>CONCIERGE ONLINE*</small></span>
+        <span><b>ASK PENNY</b><small>CONCIERGE ONLINE</small></span>
         <i />
       </button>
 
       {pennyOpen && (
-        <section className="penny-panel" aria-label="Ask Penny preview">
+        <section className="penny-panel" aria-label="Ask Penny">
           <header>
             <div>
               <span>♠</span>
-              <p><strong>PENNY</strong><small>CONCIERGE PREVIEW</small></p>
+              <p><strong>PENNY</strong><small>WILDCARD CONCIERGE // LIVE</small></p>
             </div>
-            <button type="button" onClick={() => setPennyOpen(false)} aria-label="Close Penny">×</button>
+            <div className="penny-header-actions">
+              <button
+                className="penny-clear"
+                type="button"
+                onClick={clearPennySession}
+                disabled={pennyBusy || pennyMessages.length === 0}
+              >
+                CLEAR
+              </button>
+              <button type="button" onClick={() => setPennyOpen(false)} aria-label="Close Penny">×</button>
+            </div>
           </header>
-          <div className="penny-message">
-            <span>ROOT // PENNY</span>
-            <p>I'm in the walls. My actual AI connection is the next build stage. For now, admire the furniture.</p>
+
+          <div className="penny-transcript" ref={chatScrollRef} aria-live="polite">
+            {pennyMessages.length === 0 && (
+              <div className="penny-message assistant">
+                <span>ROOT // PENNY</span>
+                <p>Door's open. What do you need?</p>
+              </div>
+            )}
+
+            {pennyMessages.map((message) => (
+              <div
+                className={`penny-message ${message.role === 'user' ? 'user' : 'assistant'}`}
+                key={message.id}
+              >
+                <span>{message.role === 'user' ? 'YOU // LOCAL SESSION' : 'ROOT // PENNY'}</span>
+                <p>
+                  {message.text}
+                  {message.pending && <i className="typing-cursor" aria-hidden="true" />}
+                </p>
+              </div>
+            ))}
+
+            {pennyError && (
+              <div className="penny-error" role="alert">{pennyError}</div>
+            )}
           </div>
-          <div className="penny-input">
-            <input disabled placeholder="Penny's brain connects in Stage 2" />
-            <button disabled type="button">SEND</button>
-          </div>
+
+          <form className="penny-input" onSubmit={sendPennyMessage}>
+            <textarea
+              value={pennyDraft}
+              onChange={(event) => setPennyDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  sendPennyMessage(event)
+                }
+              }}
+              disabled={pennyBusy}
+              placeholder={pennyBusy ? 'Penny is answering…' : 'Ask Penny anything…'}
+              rows="1"
+              maxLength="2000"
+              aria-label="Message Penny"
+            />
+            <button
+              type="submit"
+              disabled={pennyBusy || !pennyDraft.trim()}
+            >
+              {pennyBusy ? 'LIVE' : 'SEND'}
+            </button>
+          </form>
         </section>
       )}
 
