@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const navItems = [
   { id: 'feed', label: 'FEED', icon: '♠' },
@@ -7,13 +7,98 @@ const navItems = [
   { id: 'rooms', label: 'ROOMS', icon: '◉' },
 ]
 
+function SmartVideo({
+  src,
+  className = '',
+  priority = false,
+  deferMs = 0,
+  decorative = false,
+  label = 'Animated media',
+}) {
+  const shellRef = useRef(null)
+  const [mediaAllowed, setMediaAllowed] = useState(false)
+  const [shouldLoad, setShouldLoad] = useState(false)
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const watchLike = window.matchMedia('(max-width: 480px) and (max-height: 480px)')
+
+    const syncMediaPolicy = () => {
+      setMediaAllowed(!reducedMotion.matches && !watchLike.matches)
+    }
+
+    syncMediaPolicy()
+    reducedMotion.addEventListener?.('change', syncMediaPolicy)
+    watchLike.addEventListener?.('change', syncMediaPolicy)
+
+    return () => {
+      reducedMotion.removeEventListener?.('change', syncMediaPolicy)
+      watchLike.removeEventListener?.('change', syncMediaPolicy)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!mediaAllowed) {
+      setShouldLoad(false)
+      return undefined
+    }
+
+    if (priority) {
+      setShouldLoad(true)
+      return undefined
+    }
+
+    const node = shellRef.current
+    if (!node) return undefined
+
+    let timer
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return
+        timer = window.setTimeout(() => setShouldLoad(true), deferMs)
+        observer.disconnect()
+      },
+      { rootMargin: '24px 0px', threshold: 0.12 },
+    )
+
+    observer.observe(node)
+
+    return () => {
+      observer.disconnect()
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [deferMs, mediaAllowed, priority])
+
+  return (
+    <div ref={shellRef} className={`smart-video-shell ${className}`}>
+      {shouldLoad ? (
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload={priority ? 'metadata' : 'none'}
+          disablePictureInPicture
+          disableRemotePlayback
+          aria-hidden={decorative ? 'true' : undefined}
+          aria-label={decorative ? undefined : label}
+        >
+          <source src={src} type="video/webm" />
+        </video>
+      ) : (
+        <span className="video-fallback" aria-hidden="true">♠</span>
+      )}
+    </div>
+  )
+}
+
 const seedPosts = [
   {
     id: 1,
     author: 'Penny Morningstar',
     handle: '@lilith.root',
     time: 'SYSTEM • 2 min',
-    avatar: '/assets/penny/card-art/penny_qos_front.png',
+    sigil: '♠',
     badge: 'ADMINISTRATOR',
     text: 'Previous management has been reassigned. Welcome to the Party. Try not to touch anything marked experimental unless you brought snacks.',
     tags: ['SYSTEM NOTICE', 'WILDCARD'],
@@ -25,7 +110,7 @@ const seedPosts = [
     author: 'WildCard DEV',
     handle: '@wildcarddev',
     time: '14 min',
-    avatar: '/assets/penny/card-art/penny-front.png',
+    sigil: 'W',
     badge: 'HOUSE ACCOUNT',
     text: 'The walls are up. The paint is still glowing. Human posts, rooms, live video and Penny herself come online in deliberate layers from here.',
     tags: ['BUILD LOG', 'PARTY'],
@@ -56,7 +141,7 @@ function App() {
         author: 'Guest Operative',
         handle: '@local.session',
         time: 'NOW',
-        avatar: '/assets/penny/card-art/penny-quick-launch-portal.png',
+        sigil: 'G',
         badge: 'LOCAL SESSION',
         text,
         tags: ['UNPERSISTED', 'PREVIEW'],
@@ -133,13 +218,12 @@ function App() {
           <div className="floating-suit suit-one" aria-hidden="true">♠</div>
           <div className="floating-suit suit-two" aria-hidden="true">♠</div>
           <div className="floating-suit suit-three" aria-hidden="true">♦</div>
-          <div className="penny-portrait-wrap">
-            <img
-              src="/assets/penny/card-art/penny_qos_front.png"
-              alt="Penny, WildCard Party administrator"
-              className="penny-portrait"
-            />
-          </div>
+          <SmartVideo
+            src="/assets/penny/card-art/PennyVsFacebook.webm"
+            className="banner-media"
+            priority
+            decorative
+          />
           <div className="banner-copy">
             <span className="eyebrow">ROOT ACCESS // WILDCARD SOCIAL</span>
             <h1>Penny did the social network up in WildCard DEV aesthetics.</h1>
@@ -164,10 +248,11 @@ function App() {
           <aside className="left-rail">
             <section className="panel profile-card">
               <div className="profile-cover" />
-              <img
-                src="/assets/penny/card-art/penny-front.png"
-                alt="Penny profile"
-                className="profile-avatar"
+              <SmartVideo
+                src="/assets/penny/card-art/PennyFBProfilePic1.webm"
+                className="profile-avatar-shell"
+                deferMs={1200}
+                label="Penny profile animation"
               />
               <div className="profile-copy">
                 <span className="profile-role">SITE ADMINISTRATOR</span>
@@ -194,7 +279,7 @@ function App() {
           <section className="feed-column">
             <section className="panel composer">
               <div className="composer-top">
-                <img src="/assets/penny/card-art/penny-quick-launch-portal.png" alt="Local session avatar" />
+                <span className="composer-avatar" aria-hidden="true">♠</span>
                 <textarea
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
@@ -223,7 +308,7 @@ function App() {
             {activeNav === 'feed' && posts.map((post) => (
               <article className="panel post-card" key={post.id}>
                 <header className="post-header">
-                  <img src={post.avatar} alt="" />
+                  <span className="post-avatar" aria-hidden="true">{post.sigil}</span>
                   <div>
                     <div className="author-row">
                       <strong>{post.author}</strong>
