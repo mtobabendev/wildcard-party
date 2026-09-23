@@ -184,20 +184,35 @@ body::before {
 .penny-dock b { display: block; text-align: left; font-size: 10px; letter-spacing: .11em; }
 .penny-dock small { display: block; margin-top: 2px; color: #8f8999; font-size: 7px; letter-spacing: .08em; }
 .penny-dock i { width: 7px; height: 7px; border-radius: 50%; background: #6bffb0; box-shadow: 0 0 10px #6bffb0; }
-.penny-panel { position: fixed; right: 28px; bottom: 92px; width: min(380px, calc(100vw - 32px)); z-index: 79; border: 1px solid rgba(255,79,200,.35); border-radius: 20px; background: rgba(9,8,14,.97); backdrop-filter: blur(25px); box-shadow: 0 26px 80px rgba(0,0,0,.55), 0 0 45px rgba(255,79,200,.1); overflow: hidden; }
-.penny-panel header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(255,79,200,.08), transparent); }
-.penny-panel header > div { display: flex; gap: 9px; align-items: center; }
-.penny-panel header > div > span { width: 32px; height: 32px; display: grid; place-items: center; color: var(--pink); border: 1px solid rgba(255,79,200,.25); border-radius: 9px; }
+.penny-panel { position: fixed; right: 28px; bottom: 92px; width: min(410px, calc(100vw - 32px)); max-height: min(620px, calc(100vh - 120px)); z-index: 79; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid rgba(255,79,200,.35); border-radius: 20px; background: rgba(9,8,14,.98); backdrop-filter: blur(25px); box-shadow: 0 26px 80px rgba(0,0,0,.55), 0 0 45px rgba(255,79,200,.1); overflow: hidden; }
+.penny-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(255,79,200,.08), transparent); }
+.penny-panel header > div:first-child { display: flex; gap: 9px; align-items: center; }
+.penny-panel header > div:first-child > span { width: 32px; height: 32px; display: grid; place-items: center; color: var(--pink); border: 1px solid rgba(255,79,200,.25); border-radius: 9px; }
 .penny-panel header p { margin: 0; }
 .penny-panel header strong { display: block; font-size: 10px; letter-spacing: .13em; }
 .penny-panel header small { display: block; color: #746f7d; font-size: 7px; margin-top: 2px; }
-.penny-panel header button { border: 0; background: transparent; color: #8e8996; font-size: 22px; cursor: pointer; }
-.penny-message { margin: 18px; padding: 14px; border-radius: 14px 14px 14px 3px; background: rgba(255,79,200,.08); border: 1px solid rgba(255,79,200,.14); }
+.penny-header-actions { display: flex; align-items: center; gap: 5px; }
+.penny-panel header button { border: 0; background: transparent; color: #8e8996; cursor: pointer; }
+.penny-panel header button[aria-label="Close Penny"] { width: 32px; height: 32px; font-size: 22px; line-height: 1; }
+.penny-panel header .penny-clear { padding: 7px 8px; border-radius: 8px; color: #8e8996; font-size: 7px; font-weight: 900; letter-spacing: .12em; }
+.penny-panel header .penny-clear:hover:not(:disabled) { color: var(--pink); background: rgba(255,79,200,.07); }
+.penny-panel header button:disabled { opacity: .34; cursor: default; }
+.penny-transcript { min-height: 170px; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px 8px; scrollbar-width: thin; scrollbar-color: rgba(255,79,200,.28) transparent; }
+.penny-message { width: fit-content; max-width: 86%; margin: 0 0 11px; padding: 12px 13px; border-radius: 14px 14px 14px 3px; background: rgba(255,79,200,.08); border: 1px solid rgba(255,79,200,.14); }
+.penny-message.user { margin-left: auto; border-radius: 14px 14px 3px 14px; background: rgba(64,217,255,.07); border-color: rgba(64,217,255,.14); }
 .penny-message span { color: var(--pink); font-size: 7px; font-weight: 900; letter-spacing: .13em; }
-.penny-message p { margin: 6px 0 0; color: #c8c4ce; line-height: 1.55; font-size: 12px; }
-.penny-input { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 0 18px 18px; }
-.penny-input input { min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.03); color: #706c79; padding: 11px; font-size: 10px; }
-.penny-input button { border: 0; border-radius: 11px; background: rgba(255,79,200,.12); color: rgba(255,141,221,.6); padding: 0 13px; font-size: 8px; font-weight: 900; }
+.penny-message.user span { color: var(--cyan); }
+.penny-message p { margin: 6px 0 0; color: #d0ccd6; line-height: 1.52; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.typing-cursor { display: inline-block; width: 6px; height: 12px; margin-left: 3px; vertical-align: -2px; background: var(--pink); animation: pennyBlink .8s steps(1,end) infinite; }
+.penny-error { margin: 6px 0 10px; padding: 9px 10px; border: 1px solid rgba(255,104,132,.18); border-radius: 10px; background: rgba(255,64,96,.06); color: #ff9cad; font-size: 9px; line-height: 1.45; }
+.penny-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--line); background: rgba(6,6,10,.86); }
+.penny-input textarea { width: 100%; min-height: 42px; max-height: 110px; resize: none; border: 1px solid var(--line); border-radius: 11px; outline: none; background: rgba(255,255,255,.03); color: #d8d4df; padding: 11px 12px; font-size: 11px; line-height: 1.4; }
+.penny-input textarea:focus { border-color: rgba(255,79,200,.34); box-shadow: 0 0 0 3px rgba(255,79,200,.045); }
+.penny-input textarea::placeholder { color: #6f6a78; }
+.penny-input button { min-width: 58px; border: 0; border-radius: 11px; background: linear-gradient(135deg, #ff4fc8, #bd2fff); color: #08050a; padding: 0 13px; font-size: 8px; font-weight: 1000; letter-spacing: .08em; cursor: pointer; }
+.penny-input button:disabled { opacity: .36; cursor: default; filter: saturate(.5); }
+
+@keyframes pennyBlink { 0%, 45% { opacity: 1; } 46%, 100% { opacity: .12; } }
 
 .site-footer { width: min(1520px, calc(100% - 36px)); margin: 0 auto 35px; min-height: 68px; display: flex; gap: 20px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); color: #716d7b; font-size: 9px; letter-spacing: .08em; }
 .site-footer span { color: #aaa6b2; font-weight: 900; letter-spacing: .14em; }
@@ -351,5 +366,32 @@ body::before {
   .composer-actions button:not(.publish),
   .site-footer p {
     display: none;
+  }
+
+  .penny-dock-open {
+    display: none;
+  }
+
+  .penny-panel {
+    inset: 6px;
+    width: auto;
+    max-height: none;
+    border-radius: 14px;
+    backdrop-filter: none;
+  }
+
+  .penny-transcript {
+    max-height: none;
+    min-height: 0;
+    padding: 10px 10px 4px;
+  }
+
+  .penny-message {
+    max-width: 92%;
+    padding: 10px;
+  }
+
+  .penny-input {
+    padding: 8px 10px 10px;
   }
 }
