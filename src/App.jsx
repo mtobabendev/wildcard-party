@@ -226,7 +226,10 @@ function App() {
           />
           <div className="banner-copy">
             <span className="eyebrow">ROOT ACCESS // WILDCARD SOCIAL</span>
-            <h1>Penny did the social network up in WildCard DEV aesthetics.</h1>
+            <h1>
+              <span className="headline-desktop">Penny did the social network up in WildCard DEV aesthetics.</span>
+              <span className="headline-mobile">Penny has the keys now.</span>
+            </h1>
             <p>
               Familiar social anatomy. Black glass, hot pink circuitry, playing cards and a resident AI concierge waiting behind the next locked door.
             </p>
