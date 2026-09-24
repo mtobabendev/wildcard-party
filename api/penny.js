@@ -103,8 +103,7 @@ export default async function handler(req, res) {
     })
   }
 
-  const ip = clientIp(req)
-  if (!rateAllowed(ip)) {
+  if (!rateAllowed(req)) {
     return res.status(429).json({
       error: 'Penny has hit the brakes for a minute. Try again shortly.',
     })
