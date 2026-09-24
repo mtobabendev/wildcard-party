@@ -395,3 +395,240 @@ body::before {
     padding: 8px 10px 10px;
   }
 }
+
+
+/* Stage 3A: persistent feed + comments */
+.feed-state {
+  padding: 16px 18px;
+  color: #8e8998;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-align: center;
+}
+
+.feed-state-error {
+  color: #ff9cad;
+  border-color: rgba(255, 104, 132, .18);
+  background: rgba(255, 64, 96, .045);
+}
+
+.composer-actions .publish:disabled {
+  opacity: .45;
+  cursor: default;
+  filter: saturate(.55);
+}
+
+.post-owner-actions {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.post-owner-actions button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+  color: #7f7b89;
+  padding: 6px 7px;
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.post-owner-actions button:hover {
+  color: var(--pink);
+  border-color: rgba(255,79,200,.24);
+  background: rgba(255,79,200,.05);
+}
+
+.post-edit {
+  margin: 15px 0;
+}
+
+.post-edit textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid rgba(255,79,200,.2);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  color: #d9d5df;
+  padding: 12px;
+  outline: none;
+  line-height: 1.55;
+}
+
+.post-edit textarea:focus {
+  border-color: rgba(255,79,200,.42);
+  box-shadow: 0 0 0 3px rgba(255,79,200,.045);
+}
+
+.post-edit > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.post-edit button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255,255,255,.03);
+  color: #9d98a6;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .09em;
+}
+
+.post-edit button:last-child {
+  color: #ff91df;
+  border-color: rgba(255,79,200,.24);
+  background: rgba(255,79,200,.06);
+}
+
+.comments-panel {
+  margin-top: 8px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+
+.comments-loading {
+  margin: 6px 2px 12px;
+  color: #777382;
+  font-size: 9px;
+  letter-spacing: .06em;
+}
+
+.comment-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr);
+  gap: 9px;
+  padding: 8px 2px;
+}
+
+.comment-row + .comment-row {
+  border-top: 1px solid rgba(255,255,255,.035);
+}
+
+.comment-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(64,217,255,.16);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(64,217,255,.07), rgba(255,79,200,.07));
+  color: #9deaff;
+  font-family: Georgia, serif;
+  font-size: 14px;
+}
+
+.comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 18px;
+  flex-wrap: wrap;
+}
+
+.comment-meta strong {
+  font-size: 10px;
+}
+
+.comment-meta span {
+  color: #6f6a78;
+  font-size: 8px;
+}
+
+.comment-meta button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #696573;
+  cursor: pointer;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .09em;
+}
+
+.comment-meta button:hover {
+  color: var(--pink);
+}
+
+.comment-row p {
+  margin: 3px 0 0;
+  color: #aaa6b2;
+  font-size: 11px;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+}
+
+.comment-composer {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.05);
+}
+
+.comment-composer input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+  color: #d0ccd7;
+  outline: none;
+  padding: 10px 11px;
+  font-size: 10px;
+}
+
+.comment-composer input:focus {
+  border-color: rgba(255,79,200,.3);
+}
+
+.comment-composer input::placeholder {
+  color: #6f6a78;
+}
+
+.comment-composer button {
+  min-width: 52px;
+  border: 1px solid rgba(255,79,200,.23);
+  border-radius: 10px;
+  background: rgba(255,79,200,.08);
+  color: #ff8bdc;
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.comment-composer button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .post-owner-actions {
+    gap: 3px;
+  }
+
+  .post-owner-actions button {
+    padding: 5px 6px;
+    font-size: 6px;
+  }
+
+  .comment-row {
+    grid-template-columns: 30px minmax(0,1fr);
+    gap: 8px;
+  }
+
+  .comment-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+  }
+}
