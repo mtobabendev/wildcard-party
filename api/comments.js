@@ -7,42 +7,12 @@ import {
   updateComment,
 } from '../lib/social-db.js'
 import { currentAccount, sameOrigin } from '../lib/auth-db.js'
+import { bodyOf, createFixedWindowLimiter, textField } from '../lib/http.js'
 
-const WINDOW_MS = 5 * 60 * 1000
-const MAX_WRITES = 30
-const writeBuckets = new Map()
-
-function clientIp(req) {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim()
-  return req.socket?.remoteAddress || 'unknown'
-}
-
-function allowWrite(ip) {
-  const now = Date.now()
-  const floor = now - WINDOW_MS
-  const recent = (writeBuckets.get(ip) || []).filter((stamp) => stamp > floor)
-  if (recent.length >= MAX_WRITES) {
-    writeBuckets.set(ip, recent)
-    return false
-  }
-  recent.push(now)
-  writeBuckets.set(ip, recent)
-  return true
-}
-
-function bodyOf(req) {
-  if (req.body && typeof req.body === 'object') return req.body
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body)
-  return {}
-}
-
-function textField(value, max) {
-  if (typeof value !== 'string') return ''
-  const text = value.trim()
-  if (!text || text.length > max) return ''
-  return text
-}
+const allowWrite = createFixedWindowLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxRequests: 30,
+})
 
 function ownerFrom(req, body = {}) {
   return normalizeOwnerToken(
@@ -87,7 +57,7 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Origin check failed.' })
     }
 
-    if (!allowWrite(clientIp(req))) {
+    if (!allowWrite(req)) {
       return res.status(429).json({ error: 'Comments are moving too fast from this connection. Try again shortly.' })
     }
 
