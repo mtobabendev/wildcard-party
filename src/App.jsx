@@ -11,6 +11,7 @@ const CommsPanel = lazy(() => import('./comms/CommsPanel.jsx'))
 
 function SmartVideo({
   src,
+  poster = '',
   className = '',
   priority = false,
   deferMs = 0,
@@ -97,7 +98,7 @@ function SmartVideo({
 
   return (
     <div ref={shellRef} className={`smart-video-shell ${className}`}>
-      {shouldLoad ? (
+      {mediaAllowed && shouldLoad ? (
         <video
           ref={videoRef}
           autoPlay
@@ -112,6 +113,17 @@ function SmartVideo({
         >
           <source src={src} type="video/webm" />
         </video>
+      ) : poster ? (
+        <video
+          muted
+          playsInline
+          preload="none"
+          poster={poster}
+          disablePictureInPicture
+          disableRemotePlayback
+          aria-hidden={decorative ? 'true' : undefined}
+          aria-label={decorative ? undefined : label}
+        />
       ) : (
         <span className="video-fallback" aria-hidden="true">♠</span>
       )}
@@ -835,6 +847,7 @@ function App() {
           <div className="floating-suit suit-three" aria-hidden="true">♦</div>
           <SmartVideo
             src="/assets/penny/card-art/PennyVsFacebook.webm"
+            poster="/assets/penny/card-art/PennyVsFacebook-poster.webp"
             className="banner-media"
             priority
             decorative
@@ -868,6 +881,7 @@ function App() {
               <div className="profile-cover" />
               <SmartVideo
                 src="/assets/penny/card-art/PennyFBProfilePic1.webm"
+                poster="/assets/penny/card-art/PennyFBProfilePic1-poster.webp"
                 className="profile-avatar-shell"
                 deferMs={1200}
                 label="Penny profile animation"
