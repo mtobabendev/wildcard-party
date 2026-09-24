@@ -93,6 +93,55 @@ function SmartVideo({
 }
 
 const PENNY_SESSION_KEY = 'wildcard-party:penny-session-v1'
+const SOCIAL_OWNER_KEY = 'wildcard-party:social-owner-v1'
+
+function getSocialOwnerToken() {
+  try {
+    const existing = window.localStorage.getItem(SOCIAL_OWNER_KEY)
+    if (existing && existing.length >= 32) return existing
+
+    const bytes = new Uint8Array(32)
+    window.crypto.getRandomValues(bytes)
+    const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    window.localStorage.setItem(SOCIAL_OWNER_KEY, token)
+    return token
+  } catch {
+    return ''
+  }
+}
+
+function relativeTime(value) {
+  const stamp = new Date(value).getTime()
+  if (!Number.isFinite(stamp)) return 'NOW'
+
+  const seconds = Math.max(0, Math.floor((Date.now() - stamp) / 1000))
+  if (seconds < 60) return 'NOW'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d`
+}
+
+function persistentPostFromApi(post) {
+  return {
+    id: post.id,
+    author: post.authorName,
+    handle: post.authorHandle,
+    time: relativeTime(post.createdAt),
+    sigil: 'G',
+    badge: 'GUEST OPERATIVE',
+    text: post.body,
+    tags: ['PERSISTED', 'PARTY'],
+    reactions: 0,
+    comments: post.commentCount ?? 0,
+    persisted: true,
+    owned: Boolean(post.owned),
+    createdAt: post.createdAt,
+    updatedAt: post.updatedAt,
+  }
+}
 
 function loadPennyMessages() {
   try {
@@ -142,7 +191,17 @@ function App() {
   const [activeNav, setActiveNav] = useState('feed')
   const [posts, setPosts] = useState(seedPosts)
   const [draft, setDraft] = useState('')
+  const [feedBusy, setFeedBusy] = useState(false)
+  const [feedLoading, setFeedLoading] = useState(true)
+  const [feedError, setFeedError] = useState('')
   const [liked, setLiked] = useState(() => new Set())
+  const [openComments, setOpenComments] = useState(() => new Set())
+  const [commentsByPost, setCommentsByPost] = useState({})
+  const [commentDrafts, setCommentDrafts] = useState({})
+  const [commentBusy, setCommentBusy] = useState(() => new Set())
+  const [editingPostId, setEditingPostId] = useState('')
+  const [editDraft, setEditDraft] = useState('')
+  const ownerTokenRef = useRef('')
   const [pennyOpen, setPennyOpen] = useState(false)
   const [pennyDraft, setPennyDraft] = useState('')
   const [pennyMessages, setPennyMessages] = useState(loadPennyMessages)
@@ -156,6 +215,11 @@ function App() {
     () => navItems.find((item) => item.id === activeNav)?.label ?? 'FEED',
     [activeNav],
   )
+
+  useEffect(() => {
+    ownerTokenRef.current = getSocialOwnerToken()
+    loadPersistentPosts(ownerTokenRef.current)
+  }, [])
 
   useEffect(() => {
     if (pennyBusy) return
@@ -178,26 +242,235 @@ function App() {
     chatAbortRef.current?.abort()
   }, [])
 
-  function publishPost() {
+  async function socialJson(response) {
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload?.error || 'The social layer refused that request.')
+    }
+    return payload
+  }
+
+  async function loadPersistentPosts(ownerToken = ownerTokenRef.current) {
+    setFeedLoading(true)
+    setFeedError('')
+
+    try {
+      const response = await fetch('/api/posts', {
+        headers: ownerToken ? { 'X-WildCard-Owner': ownerToken } : {},
+      })
+      const payload = await socialJson(response)
+      const persistent = (payload.posts || []).map(persistentPostFromApi)
+      setPosts([...persistent, ...seedPosts])
+      setNotice('Persistent feed online. Posts now survive refreshes.')
+    } catch (error) {
+      setFeedError(error?.message || 'Persistent feed unavailable.')
+      setPosts(seedPosts)
+    } finally {
+      setFeedLoading(false)
+    }
+  }
+
+  async function publishPost() {
     const text = draft.trim()
-    if (!text) return
-    setPosts((current) => [
-      {
-        id: Date.now(),
-        author: 'Guest Operative',
-        handle: '@local.session',
-        time: 'NOW',
-        sigil: 'G',
-        badge: 'LOCAL SESSION',
-        text,
-        tags: ['UNPERSISTED', 'PREVIEW'],
-        reactions: 0,
-        comments: 0,
-      },
-      ...current,
-    ])
-    setDraft('')
-    setNotice('Post added locally. Persistence comes with the data layer.')
+    if (!text || feedBusy) return
+
+    const ownerToken = ownerTokenRef.current || getSocialOwnerToken()
+    ownerTokenRef.current = ownerToken
+
+    if (!ownerToken) {
+      setNotice('This browser could not create a local ownership token.')
+      return
+    }
+
+    setFeedBusy(true)
+    setFeedError('')
+
+    try {
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerToken, body: text }),
+      })
+      const payload = await socialJson(response)
+      setPosts((current) => [persistentPostFromApi(payload.post), ...current])
+      setDraft('')
+      setNotice('Post persisted. Refresh away.')
+    } catch (error) {
+      setFeedError(error?.message || 'Post could not be saved.')
+      setNotice('The post did not persist.')
+    } finally {
+      setFeedBusy(false)
+    }
+  }
+
+  function startEditPost(post) {
+    if (!post?.owned) return
+    setEditingPostId(post.id)
+    setEditDraft(post.text)
+  }
+
+  async function savePostEdit(postId) {
+    const text = editDraft.trim()
+    if (!text || feedBusy) return
+
+    setFeedBusy(true)
+    try {
+      const response = await fetch('/api/posts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: postId,
+          ownerToken: ownerTokenRef.current,
+          body: text,
+        }),
+      })
+      const payload = await socialJson(response)
+      setPosts((current) => current.map((post) => (
+        post.id === postId
+          ? { ...post, text: payload.post.body, updatedAt: payload.post.updatedAt }
+          : post
+      )))
+      setEditingPostId('')
+      setEditDraft('')
+      setNotice('Post updated.')
+    } catch (error) {
+      setNotice(error?.message || 'Post edit failed.')
+    } finally {
+      setFeedBusy(false)
+    }
+  }
+
+  async function removePost(postId) {
+    if (!window.confirm('Delete this post and its comments?')) return
+
+    setFeedBusy(true)
+    try {
+      const response = await fetch('/api/posts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: postId,
+          ownerToken: ownerTokenRef.current,
+        }),
+      })
+      await socialJson(response)
+      setPosts((current) => current.filter((post) => post.id !== postId))
+      setOpenComments((current) => {
+        const next = new Set(current)
+        next.delete(postId)
+        return next
+      })
+      setNotice('Post deleted.')
+    } catch (error) {
+      setNotice(error?.message || 'Post deletion failed.')
+    } finally {
+      setFeedBusy(false)
+    }
+  }
+
+  async function toggleComments(post) {
+    if (!post.persisted) {
+      setNotice('System-post comments stay pinned until account-backed social data arrives.')
+      return
+    }
+
+    const opening = !openComments.has(post.id)
+
+    setOpenComments((current) => {
+      const next = new Set(current)
+      opening ? next.add(post.id) : next.delete(post.id)
+      return next
+    })
+
+    if (!opening || commentsByPost[post.id]) return
+
+    setCommentBusy((current) => new Set(current).add(post.id))
+
+    try {
+      const response = await fetch(`/api/comments?postId=${encodeURIComponent(post.id)}`, {
+        headers: ownerTokenRef.current
+          ? { 'X-WildCard-Owner': ownerTokenRef.current }
+          : {},
+      })
+      const payload = await socialJson(response)
+      setCommentsByPost((current) => ({
+        ...current,
+        [post.id]: payload.comments || [],
+      }))
+    } catch (error) {
+      setNotice(error?.message || 'Comments could not be loaded.')
+    } finally {
+      setCommentBusy((current) => {
+        const next = new Set(current)
+        next.delete(post.id)
+        return next
+      })
+    }
+  }
+
+  async function submitComment(postId) {
+    const text = (commentDrafts[postId] || '').trim()
+    if (!text || commentBusy.has(postId)) return
+
+    setCommentBusy((current) => new Set(current).add(postId))
+
+    try {
+      const response = await fetch('/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          postId,
+          ownerToken: ownerTokenRef.current,
+          body: text,
+        }),
+      })
+      const payload = await socialJson(response)
+      setCommentsByPost((current) => ({
+        ...current,
+        [postId]: [...(current[postId] || []), payload.comment],
+      }))
+      setCommentDrafts((current) => ({ ...current, [postId]: '' }))
+      setPosts((current) => current.map((post) => (
+        post.id === postId
+          ? { ...post, comments: (post.comments || 0) + 1 }
+          : post
+      )))
+      setNotice('Comment persisted.')
+    } catch (error) {
+      setNotice(error?.message || 'Comment could not be saved.')
+    } finally {
+      setCommentBusy((current) => {
+        const next = new Set(current)
+        next.delete(postId)
+        return next
+      })
+    }
+  }
+
+  async function removeComment(postId, commentId) {
+    try {
+      const response = await fetch('/api/comments', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: commentId,
+          ownerToken: ownerTokenRef.current,
+        }),
+      })
+      await socialJson(response)
+      setCommentsByPost((current) => ({
+        ...current,
+        [postId]: (current[postId] || []).filter((comment) => comment.id !== commentId),
+      }))
+      setPosts((current) => current.map((post) => (
+        post.id === postId
+          ? { ...post, comments: Math.max(0, (post.comments || 0) - 1) }
+          : post
+      )))
+      setNotice('Comment deleted.')
+    } catch (error) {
+      setNotice(error?.message || 'Comment deletion failed.')
+    }
   }
 
   function toggleLike(id) {
@@ -454,7 +727,14 @@ function App() {
               <div className="composer-actions">
                 <button type="button" onClick={() => setNotice('Live video arrives with the WebRTC layer.')}>◉ LIVE ROOM</button>
                 <button type="button" onClick={() => setNotice('Media upload is staged for the persistence layer.')}>▧ PHOTO / VIDEO</button>
-                <button className="publish" type="button" onClick={publishPost}>POST TO FEED</button>
+                <button
+                  className="publish"
+                  type="button"
+                  onClick={publishPost}
+                  disabled={feedBusy || !draft.trim()}
+                >
+                  {feedBusy ? 'SAVING…' : 'POST TO FEED'}
+                </button>
               </div>
             </section>
 
@@ -469,6 +749,14 @@ function App() {
               </section>
             )}
 
+            {activeNav === 'feed' && feedLoading && (
+              <section className="panel feed-state">Opening the evidence locker…</section>
+            )}
+
+            {activeNav === 'feed' && feedError && (
+              <section className="panel feed-state feed-state-error">{feedError}</section>
+            )}
+
             {activeNav === 'feed' && posts.map((post) => (
               <article className="panel post-card" key={post.id}>
                 <header className="post-header">
@@ -480,9 +768,38 @@ function App() {
                     </div>
                     <p>{post.handle} • {post.time}</p>
                   </div>
-                  <button type="button" aria-label="Post menu">•••</button>
+                  {post.persisted && post.owned ? (
+                    <div className="post-owner-actions">
+                      <button type="button" onClick={() => startEditPost(post)}>EDIT</button>
+                      <button type="button" onClick={() => removePost(post.id)}>DELETE</button>
+                    </div>
+                  ) : (
+                    <button type="button" aria-label="Post menu">•••</button>
+                  )}
                 </header>
-                <p className="post-copy">{post.text}</p>
+                {editingPostId === post.id ? (
+                  <div className="post-edit">
+                    <textarea
+                      value={editDraft}
+                      onChange={(event) => setEditDraft(event.target.value)}
+                      rows="4"
+                      maxLength="2000"
+                    />
+                    <div>
+                      <button type="button" onClick={() => {
+                        setEditingPostId('')
+                        setEditDraft('')
+                      }}>
+                        CANCEL
+                      </button>
+                      <button type="button" onClick={() => savePostEdit(post.id)}>
+                        SAVE
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="post-copy">{post.text}</p>
+                )}
                 <div className="post-tags">
                   {post.tags.map((tag) => <span key={tag}>{tag}</span>)}
                 </div>
@@ -494,9 +811,63 @@ function App() {
                   >
                     ♠ {post.reactions + (liked.has(post.id) ? 1 : 0)} REACT
                   </button>
-                  <button type="button" onClick={() => setNotice('Comments are visual-only until persistence is wired.')}>☠ {post.comments} COMMENTS</button>
+                  <button type="button" onClick={() => toggleComments(post)}>☠ {post.comments} COMMENTS</button>
                   <button type="button" onClick={() => setNotice('Sharing arrives with real routes and identities.')}>↗ SHARE</button>
                 </footer>
+
+                {post.persisted && openComments.has(post.id) && (
+                  <section className="comments-panel">
+                    {commentBusy.has(post.id) && !commentsByPost[post.id] && (
+                      <p className="comments-loading">Opening comments…</p>
+                    )}
+
+                    {(commentsByPost[post.id] || []).map((comment) => (
+                      <div className="comment-row" key={comment.id}>
+                        <span className="comment-avatar" aria-hidden="true">G</span>
+                        <div>
+                          <div className="comment-meta">
+                            <strong>{comment.authorName}</strong>
+                            <span>{comment.authorHandle} • {relativeTime(comment.createdAt)}</span>
+                            {comment.owned && (
+                              <button
+                                type="button"
+                                onClick={() => removeComment(post.id, comment.id)}
+                              >
+                                DELETE
+                              </button>
+                            )}
+                          </div>
+                          <p>{comment.body}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="comment-composer">
+                      <input
+                        value={commentDrafts[post.id] || ''}
+                        onChange={(event) => setCommentDrafts((current) => ({
+                          ...current,
+                          [post.id]: event.target.value,
+                        }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault()
+                            submitComment(post.id)
+                          }
+                        }}
+                        placeholder="Leave evidence…"
+                        maxLength="1000"
+                      />
+                      <button
+                        type="button"
+                        disabled={commentBusy.has(post.id) || !(commentDrafts[post.id] || '').trim()}
+                        onClick={() => submitComment(post.id)}
+                      >
+                        POST
+                      </button>
+                    </div>
+                  </section>
+                )}
               </article>
             ))}
           </section>
@@ -505,8 +876,8 @@ function App() {
             <section className="panel incident-board">
               <span className="panel-label">INCIDENTS</span>
               <div><b>01</b><p><strong>Penny acquired root.</strong><small>Administration changed hands.</small></p></div>
-              <div><b>02</b><p><strong>Social shell active.</strong><small>Feed and local interactions online.</small></p></div>
-              <div><b>03</b><p><strong>AI containment pending.</strong><small>Penny's brain is Stage 2.</small></p></div>
+              <div><b>02</b><p><strong>Penny is live.</strong><small>Concierge AI answering in real time.</small></p></div>
+              <div><b>03</b><p><strong>Persistence staged.</strong><small>Posts and comments ready for Postgres.</small></p></div>
             </section>
 
             <section className="panel associates">
@@ -612,7 +983,7 @@ function App() {
 
       <footer className="site-footer">
         <span>♠ WILDCARD PARTY</span>
-        <p>Stage 1 social shell • No accounts or persistent user data yet</p>
+        <p>Stage 3A social persistence • Accounts come next</p>
         <a href="https://www.wildcarddev.com" target="_blank" rel="noopener noreferrer">WILDCARD DEV</a>
       </footer>
     </div>
