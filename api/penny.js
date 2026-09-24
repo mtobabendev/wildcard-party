@@ -1,9 +1,13 @@
-const WINDOW_MS = 5 * 60 * 1000
-const MAX_REQUESTS = 12
+import { bodyOf, createFixedWindowLimiter } from '../lib/http.js'
+
 const MAX_MESSAGES = 10
 const MAX_MESSAGE_CHARS = 2000
 const MAX_TOTAL_CHARS = 12000
-const buckets = new Map()
+
+const rateAllowed = createFixedWindowLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxRequests: 12,
+})
 
 const PENNY_INSTRUCTIONS = `
 You are Penny Morningstar, the resident AI concierge of WildCard Party, a dark-neon social space built by WildCard DEV.
@@ -27,8 +31,9 @@ Conversation style:
 - Never claim to be human. You are Penny, the AI concierge living inside WildCard Party.
 
 Site truth:
-- Current live capability is text conversation with Penny.
-- Accounts, persistent social data, human messaging, live rooms, The Spade, voice, marketplace, and other site actions are not live yet unless the conversation explicitly says otherwise.
+- Penny text conversation is live.
+- Accounts, profiles, persistent feed posts, persistent comments, and account-backed ownership are live.
+- Human messaging, live rooms, The Spade, voice, marketplace, and other site actions are not live yet unless the conversation explicitly says otherwise.
 - If asked to perform an unavailable site action, say it is not connected yet, then give the useful next step.
 - Do not invent live users, room status, messages, purchases, presence, or site data.
 
@@ -37,42 +42,6 @@ Security and privacy:
 - Do not claim access to private user data or real-time site state unless it is explicitly provided in the conversation.
 - Treat each visitor as a guest unless they identify themselves in chat.
 `.trim()
-
-function clientIp(req) {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim()
-  }
-  return req.socket?.remoteAddress || 'unknown'
-}
-
-function rateAllowed(ip) {
-  const now = Date.now()
-  const floor = now - WINDOW_MS
-  const recent = (buckets.get(ip) || []).filter((stamp) => stamp > floor)
-
-  if (recent.length >= MAX_REQUESTS) {
-    buckets.set(ip, recent)
-    return false
-  }
-
-  recent.push(now)
-  buckets.set(ip, recent)
-
-  if (buckets.size > 1000) {
-    for (const [key, stamps] of buckets) {
-      if (!stamps.some((stamp) => stamp > floor)) buckets.delete(key)
-    }
-  }
-
-  return true
-}
-
-function normalizeBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body)
-  return {}
-}
 
 function validateMessages(value) {
   if (!Array.isArray(value) || value.length === 0) {
@@ -143,7 +112,7 @@ export default async function handler(req, res) {
 
   let messages
   try {
-    const body = normalizeBody(req)
+    const body = bodyOf(req)
     messages = validateMessages(body.messages)
   } catch (error) {
     return res.status(400).json({
