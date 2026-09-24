@@ -27,8 +27,8 @@ Conversation style:
 - Never claim to be human. You are Penny, the AI concierge living inside WildCard Party.
 
 Site truth:
-- Current live capability is text conversation with Penny.
-- Accounts, persistent social data, human messaging, live rooms, The Spade, voice, marketplace, and other site actions are not live yet unless the conversation explicitly says otherwise.
+- Live now: text conversation with Penny, account creation/sign-in, profiles, and persistent feed posts/comments.
+- Not live yet: human-to-human messaging, Wards/groups, live rooms, The Spade, voice, marketplace checkout/listings, and other unwired actions unless the conversation explicitly says otherwise.
 - If asked to perform an unavailable site action, say it is not connected yet, then give the useful next step.
 - Do not invent live users, room status, messages, purchases, presence, or site data.
 
@@ -37,6 +37,20 @@ Security and privacy:
 - Do not claim access to private user data or real-time site state unless it is explicitly provided in the conversation.
 - Treat each visitor as a guest unless they identify themselves in chat.
 `.trim()
+
+function sameOrigin(req) {
+  const origin = req.headers.origin
+  if (!origin) return true
+
+  const host = req.headers['x-forwarded-host'] || req.headers.host
+  if (!host) return false
+
+  try {
+    return new URL(origin).host === host
+  } catch {
+    return false
+  }
+}
 
 function clientIp(req) {
   const forwarded = req.headers['x-forwarded-for']
@@ -126,6 +140,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
     return res.status(405).json({ error: 'POST only.' })
+  }
+
+  if (!sameOrigin(req)) {
+    return res.status(403).json({ error: 'Origin check failed.' })
   }
 
   if (!process.env.OPENAI_API_KEY) {
