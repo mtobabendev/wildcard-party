@@ -8,12 +8,7 @@ import {
   sameOrigin,
   updateAccountProfile,
 } from '../../lib/auth-db.js'
-
-function bodyOf(req) {
-  if (req.body && typeof req.body === 'object') return req.body
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body)
-  return {}
-}
+import { bodyOf } from '../../lib/http.js'
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
