@@ -132,13 +132,17 @@ function relativeTime(value) {
 }
 
 function persistentPostFromApi(post) {
+  const accountBacked = Boolean(post.accountId)
+
   return {
     id: post.id,
     author: post.authorName,
     handle: post.authorHandle,
     time: relativeTime(post.createdAt),
-    sigil: 'G',
-    badge: 'GUEST OPERATIVE',
+    sigil: accountBacked
+      ? (post.authorName?.trim()?.slice(0, 1).toUpperCase() || '♠')
+      : 'G',
+    badge: accountBacked ? 'MEMBER' : 'GUEST OPERATIVE',
     text: post.body,
     tags: ['PERSISTED', 'PARTY'],
     reactions: 0,
@@ -393,7 +397,7 @@ function App() {
       setAccount(null)
       setAccountMode('login')
       setAccountForm({ displayName: '', handle: '', password: '', bio: '' })
-      setNotice('Signed out. This browser still retains its local Stage 3A ownership token.')
+      setNotice('Signed out. Account-owned content now requires sign-in; local ownership remains only for anonymous posts.')
       await loadPersistentPosts(ownerTokenRef.current)
     } catch (error) {
       setAccountError(error?.message || 'Sign out failed.')
@@ -982,7 +986,11 @@ function App() {
 
                     {(commentsByPost[post.id] || []).map((comment) => (
                       <div className="comment-row" key={comment.id}>
-                        <span className="comment-avatar" aria-hidden="true">G</span>
+                        <span className="comment-avatar" aria-hidden="true">
+                          {comment.accountId
+                            ? (comment.authorName?.trim()?.slice(0, 1).toUpperCase() || '♠')
+                            : 'G'}
+                        </span>
                         <div>
                           <div className="comment-meta">
                             <strong>{comment.authorName}</strong>
