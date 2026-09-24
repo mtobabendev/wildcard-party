@@ -64,7 +64,6 @@ body::before {
 .main-nav button.active::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -11px; height: 2px; background: var(--pink); box-shadow: 0 0 14px var(--pink); }
 .top-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; }
 .donate-link { text-decoration: none; padding: 11px 13px; border: 1px solid rgba(255,79,200,.36); border-radius: 12px; color: #ff91de; background: rgba(255,79,200,.06); font-size: 9px; font-weight: 900; letter-spacing: .13em; }
-.round-action { width: 39px; height: 39px; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.05); cursor: pointer; font-weight: 900; color: var(--pink); }
 
 .page-shell { width: min(1520px, calc(100% - 36px)); margin: 26px auto 110px; }
 .takeover-banner {
@@ -275,8 +274,7 @@ body::before {
   .donate-link { padding: 7px 8px; font-size: 6px; letter-spacing: .07em; }
   .brand strong { font-size: 11px; }
   .brand-suit { width: 38px; height: 38px; border-radius: 11px; }
-  .round-action { width: 36px; height: 36px; }
-  .takeover-banner { min-height: 385px; border-radius: 21px; }
+    .takeover-banner { min-height: 385px; border-radius: 21px; }
   .banner-copy { padding: 15px 15px 17px; }
   .banner-copy h1 { font-size: 29px; max-width: 10ch; }
   .banner-status-row { margin-top: 8px; }
