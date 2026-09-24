@@ -282,7 +282,7 @@ export default function CommsPanel({
 
     const handleRecovery = () => {
       if (!document.hidden) {
-        startPolling({ refreshMessages: true })
+        startPolling({ refreshMessages: true, resetInflight: true })
       }
     }
 
