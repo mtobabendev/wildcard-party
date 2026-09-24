@@ -202,6 +202,18 @@ function App() {
   const [editingPostId, setEditingPostId] = useState('')
   const [editDraft, setEditDraft] = useState('')
   const ownerTokenRef = useRef('')
+  const [account, setAccount] = useState(null)
+  const [accountLoading, setAccountLoading] = useState(true)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [accountMode, setAccountMode] = useState('login')
+  const [accountBusy, setAccountBusy] = useState(false)
+  const [accountError, setAccountError] = useState('')
+  const [accountForm, setAccountForm] = useState({
+    displayName: '',
+    handle: '',
+    password: '',
+    bio: '',
+  })
   const [pennyOpen, setPennyOpen] = useState(false)
   const [pennyDraft, setPennyDraft] = useState('')
   const [pennyMessages, setPennyMessages] = useState(loadPennyMessages)
@@ -218,7 +230,9 @@ function App() {
 
   useEffect(() => {
     ownerTokenRef.current = getSocialOwnerToken()
-    loadPersistentPosts(ownerTokenRef.current)
+    loadAccount().finally(() => {
+      loadPersistentPosts(ownerTokenRef.current)
+    })
   }, [])
 
   useEffect(() => {
@@ -248,6 +262,138 @@ function App() {
       throw new Error(payload?.error || 'The social layer refused that request.')
     }
     return payload
+  }
+
+  async function loadAccount() {
+    setAccountLoading(true)
+
+    try {
+      const response = await fetch('/api/auth/me')
+      const payload = await socialJson(response)
+      setAccount(payload.account || null)
+
+      if (payload.account) {
+        setAccountForm((current) => ({
+          ...current,
+          displayName: payload.account.displayName || '',
+          handle: payload.account.handle || '',
+          bio: payload.account.bio || '',
+          password: '',
+        }))
+      }
+    } catch {
+      setAccount(null)
+    } finally {
+      setAccountLoading(false)
+    }
+  }
+
+  function openAccountPanel(mode = account ? 'profile' : 'login') {
+    setPennyOpen(false)
+    setAccountError('')
+    setAccountMode(mode)
+    setAccountOpen(true)
+
+    if (account) {
+      setAccountForm({
+        displayName: account.displayName || '',
+        handle: account.handle || '',
+        password: '',
+        bio: account.bio || '',
+      })
+    }
+  }
+
+  function updateAccountField(field, value) {
+    setAccountForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function submitAccount(event) {
+    event.preventDefault()
+    if (accountBusy) return
+
+    setAccountBusy(true)
+    setAccountError('')
+
+    try {
+      const endpoint = accountMode === 'register'
+        ? '/api/auth/register'
+        : accountMode === 'profile'
+          ? '/api/auth/profile'
+          : '/api/auth/login'
+
+      const body = accountMode === 'profile'
+        ? {
+            displayName: accountForm.displayName,
+            handle: accountForm.handle,
+            bio: accountForm.bio,
+            ownerToken: ownerTokenRef.current,
+          }
+        : accountMode === 'register'
+          ? {
+              displayName: accountForm.displayName,
+              handle: accountForm.handle,
+              password: accountForm.password,
+              ownerToken: ownerTokenRef.current,
+            }
+          : {
+              handle: accountForm.handle,
+              password: accountForm.password,
+              ownerToken: ownerTokenRef.current,
+            }
+
+      const response = await fetch(endpoint, {
+        method: accountMode === 'profile' ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const payload = await socialJson(response)
+      const nextAccount = payload.account
+
+      setAccount(nextAccount)
+      setAccountMode('profile')
+      setAccountForm({
+        displayName: nextAccount.displayName || '',
+        handle: nextAccount.handle || '',
+        password: '',
+        bio: nextAccount.bio || '',
+      })
+
+      const claimedCount = (payload.claimed?.posts || 0) + (payload.claimed?.comments || 0)
+      setNotice(
+        claimedCount > 0
+          ? `Identity locked. Claimed ${claimedCount} existing item${claimedCount === 1 ? '' : 's'}.`
+          : accountMode === 'profile'
+            ? 'Profile updated across your authored content.'
+            : `Welcome, @${nextAccount.handle}. Identity online.`,
+      )
+
+      await loadPersistentPosts(ownerTokenRef.current)
+    } catch (error) {
+      setAccountError(error?.message || 'Identity request failed.')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  async function signOut() {
+    if (accountBusy) return
+    setAccountBusy(true)
+    setAccountError('')
+
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' })
+      await socialJson(response)
+      setAccount(null)
+      setAccountMode('login')
+      setAccountForm({ displayName: '', handle: '', password: '', bio: '' })
+      setNotice('Signed out. This browser still retains its local Stage 3A ownership token.')
+      await loadPersistentPosts(ownerTokenRef.current)
+    } catch (error) {
+      setAccountError(error?.message || 'Sign out failed.')
+    } finally {
+      setAccountBusy(false)
+    }
   }
 
   async function loadPersistentPosts(ownerToken = ownerTokenRef.current) {
@@ -641,7 +787,14 @@ function App() {
           >
             FUND THE TAKEOVER
           </a>
-          <button className="round-action" type="button" aria-label="Notifications">6</button>
+          <button
+            className="account-action"
+            type="button"
+            onClick={() => openAccountPanel(account ? 'profile' : 'login')}
+            aria-label={account ? 'Open profile' : 'Sign in'}
+          >
+            {accountLoading ? '…' : account ? account.displayName.slice(0, 1).toUpperCase() : 'SIGN IN'}
+          </button>
         </div>
       </header>
 
@@ -902,12 +1055,136 @@ function App() {
       <button
         className={`penny-dock ${pennyOpen ? 'penny-dock-open' : ''}`}
         type="button"
-        onClick={() => setPennyOpen((open) => !open)}
+        onClick={() => {
+          setAccountOpen(false)
+          setPennyOpen((open) => !open)
+        }}
       >
         <span className="dock-sigil">♠</span>
         <span><b>ASK PENNY</b><small>CONCIERGE ONLINE</small></span>
         <i />
       </button>
+
+      {accountOpen && (
+        <section className="account-panel" aria-label="WildCard account">
+          <header>
+            <div>
+              <span>{account ? account.displayName.slice(0, 1).toUpperCase() : '♠'}</span>
+              <p>
+                <strong>{account ? account.displayName : 'WILDCARD IDENTITY'}</strong>
+                <small>{account ? `@${account.handle} // ACCOUNT ONLINE` : 'STAGE 3B // ACCOUNTS'}</small>
+              </p>
+            </div>
+            <button type="button" onClick={() => setAccountOpen(false)} aria-label="Close account">×</button>
+          </header>
+
+          {!account && (
+            <div className="account-tabs">
+              <button
+                type="button"
+                className={accountMode === 'login' ? 'active' : ''}
+                onClick={() => {
+                  setAccountMode('login')
+                  setAccountError('')
+                }}
+              >
+                SIGN IN
+              </button>
+              <button
+                type="button"
+                className={accountMode === 'register' ? 'active' : ''}
+                onClick={() => {
+                  setAccountMode('register')
+                  setAccountError('')
+                }}
+              >
+                CREATE ACCOUNT
+              </button>
+            </div>
+          )}
+
+          <form className="account-form" onSubmit={submitAccount}>
+            {(accountMode === 'register' || accountMode === 'profile') && (
+              <label>
+                <span>DISPLAY NAME</span>
+                <input
+                  value={accountForm.displayName}
+                  onChange={(event) => updateAccountField('displayName', event.target.value)}
+                  autoComplete="name"
+                  maxLength="60"
+                  required
+                />
+              </label>
+            )}
+
+            <label>
+              <span>HANDLE</span>
+              <div className="handle-input">
+                <b>@</b>
+                <input
+                  value={accountForm.handle}
+                  onChange={(event) => updateAccountField('handle', event.target.value.toLowerCase())}
+                  autoComplete="username"
+                  maxLength="24"
+                  pattern="[a-z0-9_]{3,24}"
+                  required
+                />
+              </div>
+            </label>
+
+            {accountMode !== 'profile' && (
+              <label>
+                <span>PASSWORD</span>
+                <input
+                  type="password"
+                  value={accountForm.password}
+                  onChange={(event) => updateAccountField('password', event.target.value)}
+                  autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'}
+                  minLength="10"
+                  maxLength="128"
+                  required
+                />
+                {accountMode === 'register' && <small>10+ characters. No phone number required.</small>}
+              </label>
+            )}
+
+            {accountMode === 'profile' && (
+              <label>
+                <span>BIO</span>
+                <textarea
+                  value={accountForm.bio}
+                  onChange={(event) => updateAccountField('bio', event.target.value)}
+                  rows="3"
+                  maxLength="280"
+                  placeholder="A little evidence for the file…"
+                />
+              </label>
+            )}
+
+            {accountError && <div className="account-error" role="alert">{accountError}</div>}
+
+            <button className="account-primary" type="submit" disabled={accountBusy}>
+              {accountBusy
+                ? 'WORKING…'
+                : accountMode === 'register'
+                  ? 'CREATE IDENTITY'
+                  : accountMode === 'profile'
+                    ? 'SAVE PROFILE'
+                    : 'SIGN IN'}
+            </button>
+          </form>
+
+          {account && (
+            <footer className="account-footer">
+              <div>
+                <strong>@{account.handle}</strong>
+                <span>{account.bio || 'Profile online. Bio optional.'}</span>
+              </div>
+              <button type="button" onClick={signOut} disabled={accountBusy}>SIGN OUT</button>
+            </footer>
+          )}
+        </section>
+      )}
 
       {pennyOpen && (
         <section className="penny-panel" aria-label="Ask Penny">
@@ -983,7 +1260,7 @@ function App() {
 
       <footer className="site-footer">
         <span>♠ WILDCARD PARTY</span>
-        <p>Stage 3A social persistence • Accounts come next</p>
+        <p>Stage 3B identities • Persistent ownership online</p>
         <a href="https://www.wildcarddev.com" target="_blank" rel="noopener noreferrer">WILDCARD DEV</a>
       </footer>
     </div>
