@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 const navItems = [
   { id: 'feed', label: 'FEED', icon: '♠' },
@@ -6,6 +6,8 @@ const navItems = [
   { id: 'comms', label: 'COMMS', icon: '✉' },
   { id: 'rooms', label: 'ROOMS', icon: '◉' },
 ]
+
+const CommsPanel = lazy(() => import('./comms/CommsPanel.jsx'))
 
 function SmartVideo({
   src,
@@ -658,7 +660,7 @@ function App() {
     const labels = {
       feed: 'Feed online. The inmates have the timeline.',
       wards: 'Wards are staged for groups and communities.',
-      comms: 'Comms are staged for human messaging.',
+      comms: 'Comms online. Account-backed direct messaging is active.',
       rooms: 'Rooms are staged for live sessions and The Spade.',
     }
     setNotice(labels[id])
@@ -917,7 +919,17 @@ function App() {
               </div>
             </section>
 
-            {activeNav !== 'feed' && (
+            {activeNav === 'comms' && (
+              <Suspense fallback={<section className="panel feed-state">Opening secure comms…</section>}>
+                <CommsPanel
+                  account={account}
+                  accountLoading={accountLoading}
+                  onRequireSignIn={() => openAccountPanel('login')}
+                />
+              </Suspense>
+            )}
+
+            {activeNav !== 'feed' && activeNav !== 'comms' && (
               <section className="panel staging-card">
                 <span className="panel-label">{currentTitle} // STAGING AREA</span>
                 <h2>This wing exists. The machinery comes next.</h2>
