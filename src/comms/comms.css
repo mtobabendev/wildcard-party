@@ -481,7 +481,16 @@
   }
 
   .comms-messages {
-    max-height: 330px;
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: auto;
+  }
+
+  .comms-message,
+  .comms-message * {
+    pointer-events: none;
   }
 }
 
@@ -564,7 +573,7 @@
 
   .comms-messages {
     min-height: 150px;
-    max-height: 210px;
+    max-height: none;
     padding: 9px;
   }
 

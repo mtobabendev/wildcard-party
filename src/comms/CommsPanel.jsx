@@ -81,6 +81,7 @@ export default function CommsPanel({
     try {
       const response = await fetch(url, {
         ...options,
+        cache: 'no-store',
         signal: controller.signal,
       })
       const payload = await response.json().catch(() => ({}))
@@ -154,6 +155,8 @@ export default function CommsPanel({
 
     let conversationTimer = null
     let messageTimer = null
+    let conversationController = null
+    let messageController = null
 
     const clearTimers = () => {
       if (conversationTimer) window.clearInterval(conversationTimer)
@@ -161,21 +164,42 @@ export default function CommsPanel({
       conversationTimer = null
       messageTimer = null
 
-      for (const controller of pollControllersRef.current) controller.abort()
-      pollControllersRef.current.clear()
+      conversationController?.abort()
+      messageController?.abort()
+      conversationController = null
+      messageController = null
     }
 
-    const pollConversationList = () => {
+    const pollConversationList = async () => {
+      if (document.hidden || conversationController) return
+
       const controller = new AbortController()
+      conversationController = controller
       pollControllersRef.current.add(controller)
-      loadConversations({ quiet: true, controller })
+
+      try {
+        await loadConversations({ quiet: true, controller })
+      } finally {
+        if (conversationController === controller) {
+          conversationController = null
+        }
+      }
     }
 
-    const pollActiveConversation = () => {
-      if (!selectedConversation?.id) return
+    const pollActiveConversation = async () => {
+      if (document.hidden || !selectedConversation?.id || messageController) return
+
       const controller = new AbortController()
+      messageController = controller
       pollControllersRef.current.add(controller)
-      pollMessages(selectedConversation.id, controller)
+
+      try {
+        await pollMessages(selectedConversation.id, controller)
+      } finally {
+        if (messageController === controller) {
+          messageController = null
+        }
+      }
     }
 
     const startTimers = ({ refreshMessages = false } = {}) => {
@@ -190,16 +214,34 @@ export default function CommsPanel({
       }
     }
 
-    const handleVisibility = () => {
+    const restartTimers = () => {
       clearTimers()
-      if (!document.hidden) startTimers({ refreshMessages: true })
+      if (!document.hidden) {
+        startTimers({ refreshMessages: true })
+      }
+    }
+
+    const handleVisibility = () => {
+      restartTimers()
+    }
+
+    const handleRecovery = () => {
+      if (!document.hidden) {
+        restartTimers()
+      }
     }
 
     startTimers()
     document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleRecovery)
+    window.addEventListener('pageshow', handleRecovery)
+    window.addEventListener('online', handleRecovery)
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleRecovery)
+      window.removeEventListener('pageshow', handleRecovery)
+      window.removeEventListener('online', handleRecovery)
       clearTimers()
     }
   }, [account?.id, selectedConversation?.id])
