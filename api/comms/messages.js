@@ -35,15 +35,15 @@ function normalizedBody(value) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
-  if (!['GET', 'POST'].includes(req.method)) {
-    res.setHeader('Allow', 'GET, POST')
-    return res.status(405).json({ error: 'Method not allowed.' })
-  }
-
   try {
     const account = await currentAccount(req)
     if (!account) {
       return res.status(401).json({ error: 'Sign in is required for COMMS.' })
+    }
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.setHeader('Allow', 'GET, POST')
+      return res.status(405).json({ error: 'Method not allowed.' })
     }
 
     if (req.method === 'GET') {

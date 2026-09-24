@@ -11,15 +11,15 @@ function queryValue(value) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET')
-    return res.status(405).json({ error: 'GET only.' })
-  }
-
   try {
     const account = await currentAccount(req)
     if (!account) {
       return res.status(401).json({ error: 'Sign in is required for COMMS.' })
+    }
+
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET')
+      return res.status(405).json({ error: 'GET only.' })
     }
 
     const query = queryValue(req.query?.q).trim()
