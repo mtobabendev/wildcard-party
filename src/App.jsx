@@ -22,18 +22,25 @@ function SmartVideo({
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     const watchLike = window.matchMedia('(max-width: 480px) and (max-height: 480px)')
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
 
     const syncMediaPolicy = () => {
-      setMediaAllowed(!reducedMotion.matches && !watchLike.matches)
+      setMediaAllowed(
+        !reducedMotion.matches &&
+        !watchLike.matches &&
+        !connection?.saveData
+      )
     }
 
     syncMediaPolicy()
     reducedMotion.addEventListener?.('change', syncMediaPolicy)
     watchLike.addEventListener?.('change', syncMediaPolicy)
+    connection?.addEventListener?.('change', syncMediaPolicy)
 
     return () => {
       reducedMotion.removeEventListener?.('change', syncMediaPolicy)
       watchLike.removeEventListener?.('change', syncMediaPolicy)
+      connection?.removeEventListener?.('change', syncMediaPolicy)
     }
   }, [])
 
@@ -230,9 +237,8 @@ function App() {
 
   useEffect(() => {
     ownerTokenRef.current = getSocialOwnerToken()
-    loadAccount().finally(() => {
-      loadPersistentPosts(ownerTokenRef.current)
-    })
+    void loadAccount()
+    void loadPersistentPosts(ownerTokenRef.current)
   }, [])
 
   useEffect(() => {
