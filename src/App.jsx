@@ -352,6 +352,13 @@ function App() {
     setAccountForm((current) => ({ ...current, [field]: value }))
   }
 
+  function resetCommentState() {
+    setOpenComments(new Set())
+    setCommentsByPost({})
+    setCommentDrafts({})
+    setCommentBusy(new Set())
+  }
+
   async function submitAccount(event) {
     event.preventDefault()
     if (accountBusy) return
@@ -396,10 +403,7 @@ function App() {
 
       setAccount(nextAccount)
       setAccountMode('profile')
-      setOpenComments(new Set())
-      setCommentsByPost({})
-      setCommentDrafts({})
-      setCommentBusy(new Set())
+      resetCommentState()
       setAccountForm({
         displayName: nextAccount.displayName || '',
         handle: nextAccount.handle || '',
@@ -434,10 +438,7 @@ function App() {
       await socialJson(response)
       setAccount(null)
       setAccountMode('login')
-      setOpenComments(new Set())
-      setCommentsByPost({})
-      setCommentDrafts({})
-      setCommentBusy(new Set())
+      resetCommentState()
       setAccountForm({ displayName: '', handle: '', password: '', bio: '' })
       setNotice('Signed out. Account-owned content now requires sign-in; local ownership remains only for anonymous posts.')
       await loadPersistentPosts(ownerTokenRef.current)
