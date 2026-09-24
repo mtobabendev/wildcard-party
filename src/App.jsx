@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const navItems = [
   { id: 'feed', label: 'FEED', icon: '♠' },
@@ -16,6 +16,7 @@ function SmartVideo({
   label = 'Animated media',
 }) {
   const shellRef = useRef(null)
+  const videoRef = useRef(null)
   const [mediaAllowed, setMediaAllowed] = useState(false)
   const [shouldLoad, setShouldLoad] = useState(false)
 
@@ -76,10 +77,46 @@ function SmartVideo({
     }
   }, [deferMs, mediaAllowed, priority])
 
+  useEffect(() => {
+    if (!mediaAllowed || !shouldLoad) return undefined
+
+    const node = shellRef.current
+    const video = videoRef.current
+    if (!node || !video) return undefined
+
+    let visible = true
+
+    const syncPlayback = () => {
+      if (document.hidden || !visible) {
+        video.pause()
+        return
+      }
+
+      video.play().catch(() => {})
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        visible = entry.isIntersecting
+        syncPlayback()
+      },
+      { rootMargin: '48px 0px', threshold: 0.01 },
+    )
+
+    observer.observe(node)
+    document.addEventListener('visibilitychange', syncPlayback)
+
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('visibilitychange', syncPlayback)
+    }
+  }, [mediaAllowed, shouldLoad])
+
   return (
     <div ref={shellRef} className={`smart-video-shell ${className}`}>
       {shouldLoad ? (
         <video
+          ref={videoRef}
           autoPlay
           muted
           loop
@@ -234,10 +271,7 @@ function App() {
   const chatScrollRef = useRef(null)
   const [notice, setNotice] = useState('Penny has seized the administrator console.')
 
-  const currentTitle = useMemo(
-    () => navItems.find((item) => item.id === activeNav)?.label ?? 'FEED',
-    [activeNav],
-  )
+  const currentTitle = navItems.find((item) => item.id === activeNav)?.label ?? 'FEED'
 
   useEffect(() => {
     ownerTokenRef.current = getSocialOwnerToken()
