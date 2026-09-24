@@ -895,7 +895,8 @@ function App() {
           </aside>
 
           <section className="feed-column">
-            <section className="panel composer">
+            {activeNav !== 'comms' && (
+              <section className="panel composer">
               <div className="composer-top">
                 <span className="composer-avatar" aria-hidden="true">♠</span>
                 <textarea
@@ -917,7 +918,8 @@ function App() {
                   {feedBusy ? 'SAVING…' : 'POST TO FEED'}
                 </button>
               </div>
-            </section>
+              </section>
+            )}
 
             {activeNav === 'comms' && (
               <Suspense fallback={<section className="panel feed-state">Opening secure comms…</section>}>
