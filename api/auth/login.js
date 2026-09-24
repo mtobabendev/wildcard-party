@@ -7,35 +7,12 @@ import {
   sameOrigin,
   validPassword,
 } from '../../lib/auth-db.js'
+import { bodyOf, createFixedWindowLimiter } from '../../lib/http.js'
 
-const WINDOW_MS = 10 * 60 * 1000
-const MAX_ATTEMPTS = 12
-const buckets = new Map()
-
-function clientIp(req) {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim()
-  return req.socket?.remoteAddress || 'unknown'
-}
-
-function allow(ip) {
-  const now = Date.now()
-  const floor = now - WINDOW_MS
-  const recent = (buckets.get(ip) || []).filter((stamp) => stamp > floor)
-  if (recent.length >= MAX_ATTEMPTS) {
-    buckets.set(ip, recent)
-    return false
-  }
-  recent.push(now)
-  buckets.set(ip, recent)
-  return true
-}
-
-function bodyOf(req) {
-  if (req.body && typeof req.body === 'object') return req.body
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body)
-  return {}
-}
+const allow = createFixedWindowLimiter({
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 12,
+})
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
@@ -49,7 +26,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Origin check failed.' })
   }
 
-  if (!allow(clientIp(req))) {
+  if (!allow(req)) {
     return res.status(429).json({ error: 'Too many sign-in attempts. Try again shortly.' })
   }
 
