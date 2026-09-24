@@ -20,6 +20,140 @@ function initials(account) {
   return source.trim().slice(0, 2).toUpperCase()
 }
 
+function commsDebugElement(target) {
+  if (target instanceof Element) return target
+  return target?.parentElement || null
+}
+
+function commsDebugElementName(element) {
+  if (!element) return '<missing>'
+
+  const tag = element.tagName?.toLowerCase() || 'node'
+  const id = element.id ? `#${element.id}` : ''
+  const classes = typeof element.className === 'string'
+    ? element.className.trim().split(/\s+/).filter(Boolean).slice(0, 4)
+    : []
+
+  return `${tag}${id}${classes.map((name) => `.${name}`).join('')}`
+}
+
+function commsDebugPoint(event) {
+  const source = event.touches?.[0] || event.changedTouches?.[0] || event
+  const clientX = Number.isFinite(source?.clientX) ? Math.round(source.clientX) : null
+  const clientY = Number.isFinite(source?.clientY) ? Math.round(source.clientY) : null
+
+  return { clientX, clientY }
+}
+
+function commsDebugTextSnippet(element, limit = 48) {
+  const value = element?.textContent?.replace(/\s+/g, ' ').trim() || ''
+  if (!value) return ''
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+}
+
+function commsDebugSelection(limit = 64) {
+  const value = window.getSelection()?.toString() || ''
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+}
+
+function commsDebugScrollState() {
+  return {
+    windowY: Math.round(window.scrollY || 0),
+    documentTop: Math.round(document.documentElement?.scrollTop || 0),
+    bodyTop: Math.round(document.body?.scrollTop || 0),
+  }
+}
+
+function commsDebugStyleLine(label, element) {
+  if (!element) return `${label}: <missing>`
+
+  const style = window.getComputedStyle(element)
+  const webkitUserSelect = style.getPropertyValue('-webkit-user-select') || '-'
+
+  return [
+    `${label} ${commsDebugElementName(element)}`,
+    `display=${style.display}`,
+    `position=${style.position}`,
+    `overflow=${style.overflow}/${style.overflowX}/${style.overflowY}`,
+    `touch=${style.touchAction || '-'}`,
+    `overscroll=${style.getPropertyValue('overscroll-behavior') || '-'}/${style.getPropertyValue('overscroll-behavior-y') || '-'}`,
+    `pointer=${style.pointerEvents}`,
+    `select=${style.userSelect || '-'}/${webkitUserSelect}`,
+    `height=${style.height}`,
+    `max=${style.maxHeight}`,
+    `box=${element.clientHeight}/${element.scrollHeight}/${Math.round(element.scrollTop || 0)}`,
+  ].join(' | ')
+}
+
+function commsDebugStartSnapshot(event) {
+  const target = commsDebugElement(event.target)
+  const message = target?.closest('.comms-message') || null
+  const messages = target?.closest('.comms-messages') || document.querySelector('.comms-messages')
+  const chat = target?.closest('.comms-chat') || document.querySelector('.comms-chat')
+  const shell = target?.closest('.comms-shell') || document.querySelector('.comms-shell')
+  const commsPanel = target?.closest('.comms-panel') || document.querySelector('.comms-panel')
+  const panel = target?.closest('.panel') || null
+  const feedColumn = target?.closest('.feed-column') || null
+
+  const path = (event.composedPath?.() || [])
+    .filter((item) => item instanceof Element)
+    .slice(0, 8)
+    .map(commsDebugElementName)
+
+  return {
+    path,
+    styles: [
+      commsDebugStyleLine('message', message),
+      commsDebugStyleLine('messages', messages),
+      commsDebugStyleLine('chat', chat),
+      commsDebugStyleLine('shell', shell),
+      commsDebugStyleLine('commsPanel', commsPanel),
+      commsDebugStyleLine('panel', panel),
+      commsDebugStyleLine('feedColumn', feedColumn),
+      commsDebugStyleLine('body', document.body),
+      commsDebugStyleLine('html', document.documentElement),
+    ],
+  }
+}
+
+function formatCommsDebug(snapshot) {
+  if (!snapshot) return 'COMMS TOUCH INSPECTOR\nWaiting for gesture…'
+
+  const {
+    eventType,
+    pointerType,
+    targetName,
+    targetText,
+    defaultPrevented,
+    cancelable,
+    startX,
+    startY,
+    currentX,
+    currentY,
+    deltaX,
+    deltaY,
+    cancelObserved,
+    scroll,
+    pageScrolled,
+    selection,
+    selectionSeen,
+    path,
+    styles,
+  } = snapshot
+
+  return [
+    'COMMS TOUCH INSPECTOR',
+    `event=${eventType} pointer=${pointerType || '-'} target=${targetName}`,
+    `text="${targetText || ''}" defaultPrevented=${defaultPrevented ? 'yes' : 'no'} cancelable=${cancelable ? 'yes' : 'no'}`,
+    `start=${startX ?? '-' },${startY ?? '-'} current=${currentX ?? '-'},${currentY ?? '-'} delta=${deltaX ?? '-'},${deltaY ?? '-'}`,
+    `pointercancel=${cancelObserved ? 'yes' : 'no'} pageScrolled=${pageScrolled ? 'yes' : 'no'}`,
+    `scroll window=${scroll.windowY} html=${scroll.documentTop} body=${scroll.bodyTop}`,
+    `selection="${selection}" selectionSeen=${selectionSeen ? 'yes' : 'no'}`,
+    `path: ${path.length ? path.join(' > ') : '<none>'}`,
+    ...styles,
+  ].join('\n')
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -38,6 +172,13 @@ export default function CommsPanel({
   const [search, setSearch] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchBusy, setSearchBusy] = useState(false)
+  const [commsDebugEnabled] = useState(() => (
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('commsDebug') === '1'
+  ))
+  const [commsDebugText, setCommsDebugText] = useState(
+    'COMMS TOUCH INSPECTOR\nWaiting for gesture…',
+  )
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -46,6 +187,7 @@ export default function CommsPanel({
   const messagesRef = useRef([])
   const shouldScrollRef = useRef(false)
   const pendingSendIdsRef = useRef(new Map())
+  const commsDebugFrameRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -73,6 +215,136 @@ export default function CommsPanel({
     shouldScrollRef.current = false
     messageViewportRef.current.scrollTop = messageViewportRef.current.scrollHeight
   }, [messages])
+
+  useEffect(() => {
+    if (!commsDebugEnabled) return undefined
+
+    let latestSnapshot = null
+    let eventSequence = 0
+    const gesture = {
+      startX: null,
+      startY: null,
+      startScroll: null,
+      cancelObserved: false,
+      selectionSeen: false,
+      path: [],
+      styles: [],
+    }
+    const listenerOptions = { capture: true, passive: true }
+
+    const renderLatest = () => {
+      if (commsDebugFrameRef.current !== null) return
+
+      commsDebugFrameRef.current = window.requestAnimationFrame(() => {
+        commsDebugFrameRef.current = null
+        setCommsDebugText(formatCommsDebug(latestSnapshot))
+      })
+    }
+
+    const observe = (event, phase) => {
+      const sequence = ++eventSequence
+      const point = commsDebugPoint(event)
+      const target = commsDebugElement(event.target)
+
+      if (phase === 'start') {
+        const startSnapshot = commsDebugStartSnapshot(event)
+        gesture.startX = point.clientX
+        gesture.startY = point.clientY
+        gesture.startScroll = commsDebugScrollState()
+        gesture.cancelObserved = false
+        gesture.selectionSeen = false
+        gesture.path = startSnapshot.path
+        gesture.styles = startSnapshot.styles
+      }
+
+      if (phase === 'cancel') {
+        gesture.cancelObserved = true
+      }
+
+      const selection = commsDebugSelection()
+      if (selection) gesture.selectionSeen = true
+
+      const scroll = commsDebugScrollState()
+      const startScroll = gesture.startScroll || scroll
+      const pageScrolled = (
+        scroll.windowY !== startScroll.windowY ||
+        scroll.documentTop !== startScroll.documentTop ||
+        scroll.bodyTop !== startScroll.bodyTop
+      )
+
+      latestSnapshot = {
+        sequence,
+        eventType: event.type,
+        pointerType: event.pointerType || (event.type.startsWith('touch') ? 'touch' : ''),
+        targetName: commsDebugElementName(target),
+        targetText: commsDebugTextSnippet(target),
+        defaultPrevented: event.defaultPrevented,
+        cancelable: event.cancelable,
+        startX: gesture.startX,
+        startY: gesture.startY,
+        currentX: point.clientX,
+        currentY: point.clientY,
+        deltaX: point.clientX === null || gesture.startX === null
+          ? null
+          : point.clientX - gesture.startX,
+        deltaY: point.clientY === null || gesture.startY === null
+          ? null
+          : point.clientY - gesture.startY,
+        cancelObserved: gesture.cancelObserved,
+        scroll,
+        pageScrolled,
+        selection,
+        selectionSeen: gesture.selectionSeen,
+        path: gesture.path,
+        styles: gesture.styles,
+      }
+
+      renderLatest()
+
+      queueMicrotask(() => {
+        if (latestSnapshot?.sequence !== sequence) return
+        latestSnapshot = {
+          ...latestSnapshot,
+          defaultPrevented: event.defaultPrevented,
+        }
+        renderLatest()
+      })
+    }
+
+    const onStart = (event) => observe(event, 'start')
+    const onMove = (event) => observe(event, 'move')
+    const onEnd = (event) => observe(event, 'end')
+    const onCancel = (event) => observe(event, 'cancel')
+
+    const listeners = 'PointerEvent' in window
+      ? [
+          ['pointerdown', onStart],
+          ['pointermove', onMove],
+          ['pointerup', onEnd],
+          ['pointercancel', onCancel],
+        ]
+      : [
+          ['touchstart', onStart],
+          ['touchmove', onMove],
+          ['touchend', onEnd],
+          ['touchcancel', onCancel],
+        ]
+
+    for (const [type, listener] of listeners) {
+      document.addEventListener(type, listener, listenerOptions)
+    }
+
+    return () => {
+      for (const [type, listener] of listeners) {
+        document.removeEventListener(type, listener, listenerOptions)
+      }
+
+      if (commsDebugFrameRef.current !== null) {
+        window.cancelAnimationFrame(commsDebugFrameRef.current)
+        commsDebugFrameRef.current = null
+      }
+    }
+  }, [commsDebugEnabled])
 
   async function requestJson(url, options = {}, suppliedController = null) {
     const controller = suppliedController || new AbortController()
@@ -641,6 +913,12 @@ export default function CommsPanel({
           )}
         </section>
       </div>
+
+      {commsDebugEnabled && (
+        <aside className="comms-debug-panel" aria-label="COMMS touch diagnostic">
+          <pre>{commsDebugText}</pre>
+        </aside>
+      )}
     </section>
   )
 }
