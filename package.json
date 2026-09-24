@@ -9,11 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.4.1",
-    "vite": "^6.3.5",
+    "@neondatabase/serverless": "^1.1.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "@neondatabase/serverless": "^1.1.0"
+    "react-dom": "^19.1.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "vite": "^6.3.5"
+  }
 }
