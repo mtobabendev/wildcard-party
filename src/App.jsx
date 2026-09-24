@@ -16,6 +16,7 @@ function SmartVideo({
   label = 'Animated media',
 }) {
   const shellRef = useRef(null)
+  const videoRef = useRef(null)
   const [mediaAllowed, setMediaAllowed] = useState(false)
   const [shouldLoad, setShouldLoad] = useState(false)
 
@@ -24,7 +25,8 @@ function SmartVideo({
     const watchLike = window.matchMedia('(max-width: 480px) and (max-height: 480px)')
 
     const syncMediaPolicy = () => {
-      setMediaAllowed(!reducedMotion.matches && !watchLike.matches)
+      const saveData = Boolean(navigator.connection?.saveData)
+      setMediaAllowed(!reducedMotion.matches && !watchLike.matches && !saveData)
     }
 
     syncMediaPolicy()
@@ -69,10 +71,33 @@ function SmartVideo({
     }
   }, [deferMs, mediaAllowed, priority])
 
+  useEffect(() => {
+    if (!shouldLoad || !mediaAllowed) return undefined
+
+    const node = shellRef.current
+    const video = videoRef.current
+    if (!node || !video) return undefined
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          video.play().catch(() => {})
+        } else {
+          video.pause()
+        }
+      },
+      { threshold: 0.05 },
+    )
+
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [mediaAllowed, shouldLoad])
+
   return (
     <div ref={shellRef} className={`smart-video-shell ${className}`}>
       {shouldLoad ? (
         <video
+          ref={videoRef}
           autoPlay
           muted
           loop
@@ -130,8 +155,8 @@ function persistentPostFromApi(post) {
     author: post.authorName,
     handle: post.authorHandle,
     time: relativeTime(post.createdAt),
-    sigil: 'G',
-    badge: 'GUEST OPERATIVE',
+    sigil: post.accountId ? (post.authorName?.trim()?.[0]?.toUpperCase() || '♠') : 'G',
+    badge: post.accountId ? 'PARTY MEMBER' : 'GUEST OPERATIVE',
     text: post.body,
     tags: ['PERSISTED', 'PARTY'],
     reactions: 0,
@@ -230,9 +255,10 @@ function App() {
 
   useEffect(() => {
     ownerTokenRef.current = getSocialOwnerToken()
-    loadAccount().finally(() => {
-      loadPersistentPosts(ownerTokenRef.current)
-    })
+    Promise.allSettled([
+      loadAccount(),
+      loadPersistentPosts(ownerTokenRef.current),
+    ])
   }, [])
 
   useEffect(() => {
@@ -1030,7 +1056,7 @@ function App() {
               <span className="panel-label">INCIDENTS</span>
               <div><b>01</b><p><strong>Penny acquired root.</strong><small>Administration changed hands.</small></p></div>
               <div><b>02</b><p><strong>Penny is live.</strong><small>Concierge AI answering in real time.</small></p></div>
-              <div><b>03</b><p><strong>Persistence staged.</strong><small>Posts and comments ready for Postgres.</small></p></div>
+              <div><b>03</b><p><strong>Persistence online.</strong><small>Accounts, posts and comments survive refreshes.</small></p></div>
             </section>
 
             <section className="panel associates">
