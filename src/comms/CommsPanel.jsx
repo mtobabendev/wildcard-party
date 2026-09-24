@@ -155,152 +155,94 @@ export default function CommsPanel({
 
     let conversationTimer = null
     let messageTimer = null
-    let pollingGeneration = 0
-    let disposed = false
-    let conversationPollPromise = null
-    let messagePollPromise = null
     let conversationController = null
     let messageController = null
 
     const clearTimers = () => {
-      if (conversationTimer) window.clearTimeout(conversationTimer)
-      if (messageTimer) window.clearTimeout(messageTimer)
+      if (conversationTimer) window.clearInterval(conversationTimer)
+      if (messageTimer) window.clearInterval(messageTimer)
       conversationTimer = null
       messageTimer = null
-    }
 
-    const abortPolls = () => {
       conversationController?.abort()
       messageController?.abort()
+      conversationController = null
+      messageController = null
     }
 
-    const pollConversationList = () => {
-      if (disposed || document.hidden) return Promise.resolve()
-      if (conversationPollPromise) return conversationPollPromise
+    const pollConversationList = async () => {
+      if (document.hidden || conversationController) return
 
       const controller = new AbortController()
       conversationController = controller
       pollControllersRef.current.add(controller)
 
-      const promise = loadConversations({ quiet: true, controller }).finally(() => {
-        if (conversationController === controller) conversationController = null
-        if (conversationPollPromise === promise) conversationPollPromise = null
-      })
-
-      conversationPollPromise = promise
-      return promise
+      try {
+        await loadConversations({ quiet: true, controller })
+      } finally {
+        if (conversationController === controller) {
+          conversationController = null
+        }
+      }
     }
 
-    const pollActiveConversation = () => {
-      if (disposed || document.hidden || !selectedConversation?.id) {
-        return Promise.resolve()
-      }
-      if (messagePollPromise) return messagePollPromise
+    const pollActiveConversation = async () => {
+      if (document.hidden || !selectedConversation?.id || messageController) return
 
       const controller = new AbortController()
       messageController = controller
       pollControllersRef.current.add(controller)
 
-      const promise = pollMessages(selectedConversation.id, controller).finally(() => {
-        if (messageController === controller) messageController = null
-        if (messagePollPromise === promise) messagePollPromise = null
-      })
-
-      messagePollPromise = promise
-      return promise
-    }
-
-    const scheduleConversationPoll = (generation) => {
-      if (disposed || document.hidden || generation !== pollingGeneration) return
-
-      conversationTimer = window.setTimeout(async () => {
-        conversationTimer = null
-        await pollConversationList()
-        scheduleConversationPoll(generation)
-      }, 12000)
-    }
-
-    const scheduleMessagePoll = (generation) => {
-      if (
-        disposed ||
-        document.hidden ||
-        generation !== pollingGeneration ||
-        !selectedConversation?.id
-      ) {
-        return
+      try {
+        await pollMessages(selectedConversation.id, controller)
+      } finally {
+        if (messageController === controller) {
+          messageController = null
+        }
       }
-
-      messageTimer = window.setTimeout(async () => {
-        messageTimer = null
-        await pollActiveConversation()
-        scheduleMessagePoll(generation)
-      }, 4000)
     }
 
-    const startPolling = async ({
-      refreshMessages = false,
-      resetInflight = false,
-    } = {}) => {
-      const generation = ++pollingGeneration
+    const startTimers = ({ refreshMessages = false } = {}) => {
+      if (document.hidden) return
+
+      pollConversationList()
+      if (refreshMessages) pollActiveConversation()
+
+      conversationTimer = window.setInterval(pollConversationList, 12000)
+      if (selectedConversation?.id) {
+        messageTimer = window.setInterval(pollActiveConversation, 4000)
+      }
+    }
+
+    const restartTimers = () => {
       clearTimers()
-
-      if (disposed || document.hidden) return
-
-      if (resetInflight) {
-        abortPolls()
-        const pending = [conversationPollPromise, messagePollPromise].filter(Boolean)
-        if (pending.length) await Promise.allSettled(pending)
-
-        if (disposed || document.hidden || generation !== pollingGeneration) return
+      if (!document.hidden) {
+        startTimers({ refreshMessages: true })
       }
-
-      const sync = [pollConversationList()]
-      if (refreshMessages && selectedConversation?.id) {
-        sync.push(pollActiveConversation())
-      }
-      await Promise.all(sync)
-
-      if (disposed || document.hidden || generation !== pollingGeneration) return
-
-      scheduleConversationPoll(generation)
-      scheduleMessagePoll(generation)
-    }
-
-    const stopPolling = () => {
-      pollingGeneration += 1
-      clearTimers()
-      abortPolls()
     }
 
     const handleVisibility = () => {
-      if (document.hidden) {
-        stopPolling()
-      } else {
-        startPolling({ refreshMessages: true, resetInflight: true })
-      }
+      restartTimers()
     }
 
     const handleRecovery = () => {
       if (!document.hidden) {
-        startPolling({ refreshMessages: true, resetInflight: true })
+        restartTimers()
       }
     }
 
-    startPolling()
+    startTimers()
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('focus', handleRecovery)
     window.addEventListener('pageshow', handleRecovery)
     window.addEventListener('online', handleRecovery)
 
     return () => {
-      disposed = true
-      pollingGeneration += 1
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('focus', handleRecovery)
       window.removeEventListener('pageshow', handleRecovery)
       window.removeEventListener('online', handleRecovery)
       clearTimers()
-      abortPolls()
     }
   }, [account?.id, selectedConversation?.id])
 
