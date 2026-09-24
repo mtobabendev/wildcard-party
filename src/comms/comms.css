@@ -482,6 +482,9 @@
 
   .comms-messages {
     max-height: 330px;
+    touch-action: pan-y;
+    overscroll-behavior-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
