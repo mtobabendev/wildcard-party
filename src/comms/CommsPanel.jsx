@@ -20,6 +20,23 @@ function initials(account) {
   return source.trim().slice(0, 2).toUpperCase()
 }
 
+function presenceText(presence) {
+  if (presence?.isOnline === true) return 'ONLINE'
+
+  const stamp = new Date(presence?.lastActiveAt || '').getTime()
+  if (!Number.isFinite(stamp)) return 'OFFLINE'
+
+  const minutes = Math.max(0, Math.floor((Date.now() - stamp) / 60000))
+  if (minutes < 1) return 'ACTIVE <1M AGO'
+  if (minutes < 60) return `ACTIVE ${minutes}M AGO`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `ACTIVE ${hours}H AGO`
+
+  const days = Math.floor(hours / 24)
+  return `ACTIVE ${days}D AGO`
+}
+
 function numericUnreadCount(value) {
   const count = Number(value)
   return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
@@ -709,7 +726,14 @@ export default function CommsPanel({
                 </span>
                 <span className="comms-conversation-copy">
                   <strong>{conversation.otherAccount?.displayName || 'WildCard Account'}</strong>
-                  <small>@{conversation.otherAccount?.handle || 'unknown'}</small>
+                  <small>
+                    @{conversation.otherAccount?.handle || 'unknown'}
+                    <span
+                      className={`comms-presence${conversation.otherPresence?.isOnline ? ' online' : ''}`}
+                    >
+                      {presenceText(conversation.otherPresence)}
+                    </span>
+                  </small>
                   <em>{previewText(conversation.latestMessage)}</em>
                 </span>
                 {numericUnreadCount(conversation.unreadCount) > 0 && (
@@ -744,7 +768,14 @@ export default function CommsPanel({
                 </span>
                 <div>
                   <strong>{selectedConversation.otherAccount?.displayName}</strong>
-                  <small>@{selectedConversation.otherAccount?.handle}</small>
+                  <small>
+                    @{selectedConversation.otherAccount?.handle}
+                    <span
+                      className={`comms-presence${selectedConversation.otherPresence?.isOnline ? ' online' : ''}`}
+                    >
+                      {presenceText(selectedConversation.otherPresence)}
+                    </span>
+                  </small>
                 </div>
               </header>
 
