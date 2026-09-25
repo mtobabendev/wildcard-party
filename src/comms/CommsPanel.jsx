@@ -141,6 +141,29 @@ function compareMessageOrder(left, right) {
   return leftId > rightId ? 1 : -1
 }
 
+const ACTIVE_CALL_STATUSES = new Set(['ringing', 'accepted'])
+const TERMINAL_CALL_STATUSES = new Set(['declined', 'cancelled', 'ended', 'missed'])
+
+function isActiveCall(call) {
+  return Boolean(call?.id && ACTIVE_CALL_STATUSES.has(call.status))
+}
+
+function isTerminalCall(call) {
+  return Boolean(call?.id && TERMINAL_CALL_STATUSES.has(call.status))
+}
+
+function callKindLabel(call) {
+  return call?.kind === 'video' ? 'VIDEO' : 'AUDIO'
+}
+
+function terminalCallLabel(call) {
+  if (call?.status === 'declined') return 'CALL DECLINED'
+  if (call?.status === 'cancelled') return 'CALL CANCELLED'
+  if (call?.status === 'ended') return 'CALL ENDED'
+  if (call?.status === 'missed') return 'CALL MISSED'
+  return 'CALL CLOSED'
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -163,6 +186,9 @@ export default function CommsPanel({
   const [otherReadThrough, setOtherReadThrough] = useState(null)
   const [attachmentFile, setAttachmentFile] = useState(null)
   const [sendStage, setSendStage] = useState('')
+  const [currentCall, setCurrentCall] = useState(null)
+  const [callBusy, setCallBusy] = useState(false)
+  const [callError, setCallError] = useState('')
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -177,6 +203,9 @@ export default function CommsPanel({
   const readInFlightRef = useRef(false)
   const pendingReadRef = useRef(null)
   const attachmentInputRef = useRef(null)
+  const currentCallRef = useRef(null)
+  const pendingCallIdsRef = useRef(new Map())
+  const terminalCallTimerRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -246,8 +275,17 @@ export default function CommsPanel({
     selectedConversationRef.current = null
     mobilePaneRef.current = 'list'
     pendingSendIdsRef.current.clear()
+    pendingCallIdsRef.current.clear()
     readMarkedRef.current.clear()
     pendingReadRef.current = null
+    currentCallRef.current = null
+    setCurrentCall(null)
+    setCallBusy(false)
+    setCallError('')
+    if (terminalCallTimerRef.current) {
+      window.clearTimeout(terminalCallTimerRef.current)
+      terminalCallTimerRef.current = null
+    }
     onUnreadCountChange?.(0)
   }, [account?.id])
 
@@ -272,6 +310,7 @@ export default function CommsPanel({
       if (!response.ok) {
         const requestError = new Error(payload?.error || 'COMMS request failed.')
         requestError.status = response.status
+        requestError.code = payload?.code || ''
         throw requestError
       }
 
@@ -279,6 +318,130 @@ export default function CommsPanel({
     } finally {
       allControllersRef.current.delete(controller)
       pollControllersRef.current.delete(controller)
+    }
+  }
+
+  function setCanonicalCall(call) {
+    if (terminalCallTimerRef.current) {
+      window.clearTimeout(terminalCallTimerRef.current)
+      terminalCallTimerRef.current = null
+    }
+
+    currentCallRef.current = call || null
+    setCurrentCall(call || null)
+
+    if (isTerminalCall(call)) {
+      const terminalId = call.id
+      terminalCallTimerRef.current = window.setTimeout(() => {
+        const current = currentCallRef.current
+        if (current?.id === terminalId && isTerminalCall(current)) {
+          currentCallRef.current = null
+          setCurrentCall(null)
+        }
+        terminalCallTimerRef.current = null
+      }, 6000)
+    }
+  }
+
+  function dismissCallState() {
+    setCanonicalCall(null)
+    setCallError('')
+  }
+
+  function callErrorText(requestError) {
+    if (requestError?.code === 'CALL_BUSY') return 'CALL BUSY'
+    if (requestError?.code === 'CALL_STATE_CONFLICT') return 'CALL STATE CHANGED'
+    if (requestError?.status === 404) return 'CALL NO LONGER AVAILABLE'
+    return requestError?.message || 'CALL REQUEST FAILED'
+  }
+
+  async function startCall(kind) {
+    const conversationId = selectedConversationRef.current?.id
+    if (!conversationId || isActiveCall(currentCallRef.current) || callBusy) return
+
+    const pendingKey = `${conversationId}\u0000${kind}`
+    const clientCallId = pendingCallIdsRef.current.get(pendingKey) || crypto.randomUUID()
+    pendingCallIdsRef.current.set(pendingKey, clientCallId)
+
+    setCallBusy(true)
+    setCallError('')
+
+    try {
+      const payload = await requestJson('/api/comms/calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          clientCallId,
+          kind,
+        }),
+      })
+
+      if (!payload.call?.id) {
+        throw new Error('The server did not return the canonical call.')
+      }
+
+      pendingCallIdsRef.current.delete(pendingKey)
+      setCanonicalCall(payload.call)
+    } catch (requestError) {
+      if (
+        requestError?.name !== 'AbortError' &&
+        Number.isInteger(requestError?.status) &&
+        requestError.status < 500
+      ) {
+        pendingCallIdsRef.current.delete(pendingKey)
+      }
+
+      if (requestError?.name !== 'AbortError') {
+        setCallError(callErrorText(requestError))
+      }
+    } finally {
+      setCallBusy(false)
+    }
+  }
+
+  async function actOnCall(action) {
+    const call = currentCallRef.current
+    if (!call?.id || callBusy) return
+
+    setCallBusy(true)
+    setCallError('')
+
+    try {
+      const payload = await requestJson('/api/comms/calls', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callId: call.id,
+          action,
+        }),
+      })
+
+      if (!payload.call?.id) {
+        throw new Error('The server did not return the canonical call.')
+      }
+
+      setCanonicalCall(payload.call)
+
+      if (action === 'accept' && payload.call.status === 'accepted') {
+        const nextConversations = await loadConversations({ quiet: true })
+        const targetConversation = nextConversations.find(
+          (conversation) => conversation.id === payload.call.conversationId,
+        )
+
+        if (
+          targetConversation &&
+          selectedConversationRef.current?.id !== targetConversation.id
+        ) {
+          await selectConversation(targetConversation)
+        }
+      }
+    } catch (requestError) {
+      if (requestError?.name !== 'AbortError') {
+        setCallError(callErrorText(requestError))
+      }
+    } finally {
+      setCallBusy(false)
     }
   }
 
@@ -518,6 +681,100 @@ export default function CommsPanel({
       clearTimers()
     }
   }, [account?.id, selectedConversation?.id])
+
+  useEffect(() => {
+    if (!account?.id) return undefined
+
+    let callTimer = null
+    let callController = null
+
+    const clearCallPolling = () => {
+      if (callTimer) window.clearInterval(callTimer)
+      callTimer = null
+      callController?.abort()
+      callController = null
+    }
+
+    const pollCall = async () => {
+      if (document.hidden || callController) return
+
+      const knownCall = currentCallRef.current
+      const pollingSpecific = isActiveCall(knownCall)
+      const url = pollingSpecific
+        ? `/api/comms/calls?id=${encodeURIComponent(knownCall.id)}`
+        : '/api/comms/calls'
+
+      const controller = new AbortController()
+      callController = controller
+
+      try {
+        const payload = await requestJson(url, {}, controller)
+
+        if (payload.call) {
+          setCanonicalCall(payload.call)
+          setCallError('')
+        } else if (!knownCall || pollingSpecific) {
+          setCanonicalCall(null)
+        }
+      } catch (requestError) {
+        if (requestError?.name !== 'AbortError') {
+          if (requestError?.status === 404 && pollingSpecific) {
+            setCanonicalCall(null)
+          } else {
+            console.error('COMMS call poll failed', requestError)
+          }
+        }
+      } finally {
+        if (callController === controller) {
+          callController = null
+        }
+      }
+    }
+
+    const startCallPolling = () => {
+      if (document.hidden) return
+      pollCall()
+      callTimer = window.setInterval(pollCall, 2000)
+    }
+
+    const restartCallPolling = () => {
+      clearCallPolling()
+      if (!document.hidden) startCallPolling()
+    }
+
+    const handleCallVisibility = () => {
+      if (document.hidden) {
+        clearCallPolling()
+      } else {
+        startCallPolling()
+      }
+    }
+
+    const handleCallRecovery = () => {
+      if (!document.hidden) restartCallPolling()
+    }
+
+    startCallPolling()
+    document.addEventListener('visibilitychange', handleCallVisibility)
+    window.addEventListener('focus', handleCallRecovery)
+    window.addEventListener('pageshow', handleCallRecovery)
+    window.addEventListener('online', handleCallRecovery)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleCallVisibility)
+      window.removeEventListener('focus', handleCallRecovery)
+      window.removeEventListener('pageshow', handleCallRecovery)
+      window.removeEventListener('online', handleCallRecovery)
+      clearCallPolling()
+    }
+  }, [account?.id])
+
+  useEffect(() => () => {
+    if (terminalCallTimerRef.current) {
+      window.clearTimeout(terminalCallTimerRef.current)
+      terminalCallTimerRef.current = null
+    }
+  }, [])
 
   async function selectConversation(conversation) {
     if (!conversation?.id) return
