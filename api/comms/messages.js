@@ -66,18 +66,18 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Use either after or before, not both.' })
       }
 
-      const messages = await listMessages({
+      const result = await listMessages({
         accountId: account.id,
         conversationId,
         after,
         before,
       })
 
-      if (messages === null) {
+      if (result === null) {
         return res.status(404).json({ error: 'Conversation not found.' })
       }
 
-      return res.status(200).json({ messages })
+      return res.status(200).json(result)
     }
 
     if (!sameOrigin(req)) {
