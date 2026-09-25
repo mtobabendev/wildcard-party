@@ -1,5 +1,42 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import './comms.css'
+
+const MAX_ATTACHMENT_BYTES = 10485760
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/json',
+  'application/zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+])
+const ATTACHMENT_ACCEPT = [...ALLOWED_ATTACHMENT_TYPES].join(',')
+
+function safeAttachmentName(value) {
+  const source = typeof value === 'string' ? value : ''
+  const basename = source.split(/[\\/]/).pop() || ''
+  const cleaned = basename
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+
+  return cleaned || 'attachment'
+}
+
+function readableBytes(value) {
+  const bytes = Number(value)
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)} KB`
+  return `${(bytes / 1048576).toFixed(bytes >= 10485760 ? 0 : 1)} MB`
+}
 
 function dedupeMessages(items) {
   const seen = new Set()
@@ -11,8 +48,10 @@ function dedupeMessages(items) {
 }
 
 function previewText(message) {
-  if (!message?.body) return 'No messages yet.'
-  return message.body.replace(/\s+/g, ' ').trim()
+  const body = message?.body?.replace(/\s+/g, ' ').trim()
+  if (body) return body
+  if (message?.attachment?.name) return `📎 ${message.attachment.name}`
+  return 'No messages yet.'
 }
 
 function initials(account) {
@@ -82,6 +121,8 @@ export default function CommsPanel({
   const [searchResults, setSearchResults] = useState([])
   const [searchBusy, setSearchBusy] = useState(false)
   const [otherReadThrough, setOtherReadThrough] = useState(null)
+  const [attachmentFile, setAttachmentFile] = useState(null)
+  const [sendStage, setSendStage] = useState('')
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -95,6 +136,7 @@ export default function CommsPanel({
   const readMarkedRef = useRef(new Map())
   const readInFlightRef = useRef(false)
   const pendingReadRef = useRef(null)
+  const attachmentInputRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -122,6 +164,8 @@ export default function CommsPanel({
     setHasOlder(false)
     setMobilePane('list')
     setOtherReadThrough(null)
+    setAttachmentFile(null)
+    setSendStage('')
     setError('')
     selectedConversationRef.current = null
     mobilePaneRef.current = 'list'
@@ -542,10 +586,43 @@ export default function CommsPanel({
     }
   }
 
+  function handleAttachmentSelection(event) {
+    const file = event.target.files?.[0] || null
+    if (!file) {
+      setAttachmentFile(null)
+      return
+    }
+
+    if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+      setError('That attachment type is not supported.')
+      event.target.value = ''
+      setAttachmentFile(null)
+      return
+    }
+
+    if (!Number.isSafeInteger(file.size) || file.size < 1 || file.size > MAX_ATTACHMENT_BYTES) {
+      setError('Attachments must be between 1 byte and 10 MiB.')
+      event.target.value = ''
+      setAttachmentFile(null)
+      return
+    }
+
+    setError('')
+    setAttachmentFile(file)
+  }
+
+  function removeAttachment() {
+    setAttachmentFile(null)
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = ''
+    }
+  }
+
   async function sendMessage() {
     const conversationId = selectedConversation?.id
     const body = draft.trim()
-    if (!conversationId || !body || sendBusy) return
+    const file = attachmentFile
+    if (!conversationId || (!body && !file) || sendBusy) return
 
     const messageLength = Array.from(body).length
     if (messageLength > 4000) {
@@ -553,21 +630,84 @@ export default function CommsPanel({
       return
     }
 
-    const pendingKey = `${conversationId}\u0000${body}`
-    const clientMessageId = pendingSendIdsRef.current.get(pendingKey) || crypto.randomUUID()
-    pendingSendIdsRef.current.set(pendingKey, clientMessageId)
+    if (file) {
+      if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+        setError('That attachment type is not supported.')
+        return
+      }
+      if (!Number.isSafeInteger(file.size) || file.size < 1 || file.size > MAX_ATTACHMENT_BYTES) {
+        setError('Attachments must be between 1 byte and 10 MiB.')
+        return
+      }
+    }
+
+    const safeName = file ? safeAttachmentName(file.name) : ''
+    const fileFingerprint = file
+      ? `${safeName}\u0000${file.type}\u0000${file.size}\u0000${file.lastModified}`
+      : ''
+    const pendingKey = `${conversationId}\u0000${body}\u0000${fileFingerprint}`
+    let pending = pendingSendIdsRef.current.get(pendingKey)
+
+    if (!pending) {
+      pending = {
+        clientMessageId: crypto.randomUUID(),
+        attachment: null,
+      }
+      pendingSendIdsRef.current.set(pendingKey, pending)
+    }
 
     setSendBusy(true)
+    setSendStage(file && !pending.attachment ? 'uploading' : 'sending')
     setError('')
 
     try {
+      if (file && !pending.attachment) {
+        const authorization = await requestJson('/api/comms/attachment-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversationId,
+            originalName: safeName,
+            contentType: file.type,
+            byteSize: file.size,
+          }),
+        })
+
+        if (!authorization.upload?.url || !authorization.upload?.key) {
+          throw new Error('The attachment upload was not authorized correctly.')
+        }
+
+        const uploadResponse = await fetch(authorization.upload.url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type,
+          },
+          body: file,
+        })
+
+        if (!uploadResponse.ok) {
+          const uploadError = new Error('Attachment upload failed.')
+          uploadError.status = uploadResponse.status
+          throw uploadError
+        }
+
+        pending.attachment = {
+          key: authorization.upload.key,
+          originalName: safeName,
+        }
+        pendingSendIdsRef.current.set(pendingKey, pending)
+      }
+
+      setSendStage('sending')
+
       const payload = await requestJson('/api/comms/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversationId,
-          clientMessageId,
+          clientMessageId: pending.clientMessageId,
           body,
+          attachment: pending.attachment,
         }),
       })
 
@@ -579,6 +719,7 @@ export default function CommsPanel({
       shouldScrollRef.current = true
       setMessages((current) => dedupeMessages([...current, payload.message]))
       setDraft('')
+      removeAttachment()
 
       if (!document.hidden) {
         queueConversationRead(conversationId, payload.message)
@@ -598,11 +739,12 @@ export default function CommsPanel({
         const ambiguous = !requestError?.status || requestError.status >= 500
         setError(
           ambiguous
-            ? 'Send status is uncertain. Retry the same text to reuse its message ID safely.'
+            ? 'Send status is uncertain. Retry the same message to reuse its canonical send state safely.'
             : requestError?.message || 'Message could not be sent.',
         )
       }
     } finally {
+      setSendStage('')
       setSendBusy(false)
     }
   }
@@ -800,17 +942,44 @@ export default function CommsPanel({
 
                 {messages.map((message) => {
                   const outgoing = message.senderAccountId === account.id
+                  const attachmentUrl = message.attachment?.id
+                    ? `/api/comms/attachment?id=${encodeURIComponent(message.attachment.id)}`
+                    : ''
+
                   return (
-                    <article
-                      key={message.id}
-                      className={`comms-message ${outgoing ? 'outgoing' : 'incoming'}`}
-                    >
-                      <span>{outgoing ? 'YOU' : 'INCOMING'}</span>
-                      <p>{message.body}</p>
-                      {outgoing && newestOutgoingRead && message.id === newestOutgoingMessage?.id && (
-                        <small className="comms-read-receipt">READ</small>
+                    <Fragment key={message.id}>
+                      <article
+                        className={`comms-message ${outgoing ? 'outgoing' : 'incoming'}`}
+                      >
+                        <span>{outgoing ? 'YOU' : 'INCOMING'}</span>
+                        {message.body && <p>{message.body}</p>}
+                        {message.attachment?.isImage && attachmentUrl && (
+                          <img
+                            className="comms-attachment-image"
+                            src={attachmentUrl}
+                            alt={message.attachment.name}
+                            loading="lazy"
+                          />
+                        )}
+                        {message.attachment && !message.attachment.isImage && (
+                          <div className="comms-file-card" aria-label={message.attachment.name}>
+                            <strong>📎 {message.attachment.name}</strong>
+                            <small>{readableBytes(message.attachment.size)}</small>
+                          </div>
+                        )}
+                        {outgoing && newestOutgoingRead && message.id === newestOutgoingMessage?.id && (
+                          <small className="comms-read-receipt">READ</small>
+                        )}
+                      </article>
+                      {message.attachment && !message.attachment.isImage && attachmentUrl && (
+                        <a
+                          className={`comms-file-download${outgoing ? ' outgoing' : ''}`}
+                          href={attachmentUrl}
+                        >
+                          DOWNLOAD
+                        </a>
                       )}
-                    </article>
+                    </Fragment>
                   )
                 })}
               </div>
@@ -825,14 +994,43 @@ export default function CommsPanel({
                   placeholder={`Message @${selectedConversation.otherAccount?.handle || 'account'}`}
                   rows="3"
                 />
+                <input
+                  ref={attachmentInputRef}
+                  className="comms-attachment-input"
+                  type="file"
+                  accept={ATTACHMENT_ACCEPT}
+                  onChange={handleAttachmentSelection}
+                />
+                <div className="comms-attachment-tools">
+                  <button
+                    type="button"
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={sendBusy}
+                  >
+                    ATTACH
+                  </button>
+                  {attachmentFile && (
+                    <span className="comms-pending-attachment">
+                      <b>{safeAttachmentName(attachmentFile.name)}</b>
+                      <small>{readableBytes(attachmentFile.size)}</small>
+                      <button type="button" onClick={removeAttachment} disabled={sendBusy}>
+                        REMOVE
+                      </button>
+                    </span>
+                  )}
+                </div>
                 <div>
                   <small>ENTER sends • SHIFT+ENTER adds a line</small>
                   <button
                     type="button"
                     onClick={sendMessage}
-                    disabled={sendBusy || !draft.trim()}
+                    disabled={sendBusy || (!draft.trim() && !attachmentFile)}
                   >
-                    {sendBusy ? 'SENDING…' : 'SEND'}
+                    {sendStage === 'uploading'
+                      ? 'UPLOADING…'
+                      : sendBusy
+                        ? 'SENDING…'
+                        : 'SEND'}
                   </button>
                 </div>
               </div>
