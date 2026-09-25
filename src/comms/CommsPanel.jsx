@@ -1365,6 +1365,55 @@ export default function CommsPanel({
                 )}
               </header>
 
+              <nav
+                className="comms-mobile-switcher"
+                aria-label="Quick switch conversations"
+              >
+                {conversations.map((conversation) => {
+                  const unreadCount = numericUnreadCount(conversation.unreadCount)
+                  const isCurrent = selectedConversation?.id === conversation.id
+                  const label = conversation.otherAccount?.displayName
+                    || conversation.otherAccount?.handle
+                    || 'WildCard Account'
+
+                  return (
+                    <button
+                      type="button"
+                      key={conversation.id}
+                      className={isCurrent ? 'active' : ''}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      aria-label={`Open conversation with ${label}${
+                        unreadCount > 0
+                          ? `, ${unreadCount} unread message${unreadCount === 1 ? '' : 's'}`
+                          : ''
+                      }`}
+                      onClick={() => selectConversation(conversation)}
+                    >
+                      <span className="comms-mobile-switcher-sigil" aria-hidden="true">
+                        {initials(conversation.otherAccount)}
+                      </span>
+                      <span className="comms-mobile-switcher-copy">
+                        <strong>{label}</strong>
+                        <small>
+                          @{conversation.otherAccount?.handle || 'unknown'}
+                          {conversation.otherPresence?.isOnline && (
+                            <b aria-label="Online"> ONLINE</b>
+                          )}
+                        </small>
+                      </span>
+                      {unreadCount > 0 && (
+                        <span
+                          className="comms-unread-badge"
+                          aria-hidden="true"
+                        >
+                          {displayUnreadCount(unreadCount)}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </nav>
+
               <div className="comms-history-tools">
                 {hasOlder ? (
                   <button type="button" onClick={loadEarlier} disabled={historyBusy}>
