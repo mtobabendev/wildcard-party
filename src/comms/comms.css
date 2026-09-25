@@ -325,6 +325,115 @@
   font-size: 8px;
 }
 
+.comms-chat-party {
+  min-width: 0;
+}
+
+.comms-call-start {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.comms-call-start button,
+.comms-call-actions button,
+.comms-call-error button {
+  border: 1px solid rgba(64,217,255,.24);
+  border-radius: 9px;
+  background: rgba(64,217,255,.06);
+  color: #92eaff;
+  cursor: pointer;
+  padding: 7px 9px;
+  font-size: 6px;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+
+.comms-call-start button:last-child,
+.comms-call-actions button:last-child {
+  border-color: rgba(255,79,200,.24);
+  background: rgba(255,79,200,.06);
+  color: #ff9ce3;
+}
+
+.comms-call-start button:disabled,
+.comms-call-actions button:disabled {
+  opacity: .38;
+  cursor: default;
+}
+
+.comms-call-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid rgba(64,217,255,.14);
+  background: rgba(64,217,255,.035);
+}
+
+.comms-call-strip.status-ringing {
+  border-bottom-color: rgba(255,79,200,.18);
+  background: rgba(255,79,200,.035);
+}
+
+.comms-call-strip.status-accepted {
+  border-bottom-color: rgba(107,255,176,.18);
+  background: rgba(107,255,176,.035);
+}
+
+.comms-call-strip.status-declined,
+.comms-call-strip.status-cancelled,
+.comms-call-strip.status-ended,
+.comms-call-strip.status-missed,
+.comms-call-strip.status-error {
+  border-bottom-color: rgba(255,255,255,.08);
+  background: rgba(255,255,255,.025);
+}
+
+.comms-call-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.comms-call-copy span,
+.comms-call-copy small {
+  color: #777280;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.comms-call-copy strong {
+  color: #e4e0e8;
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.comms-call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.comms-call-error {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #ffafbd;
+  font-size: 8px;
+}
+
+.comms-call-error button {
+  border-color: rgba(255,104,132,.24);
+  background: rgba(255,104,132,.05);
+  color: #ffafbd;
+}
+
 .comms-back {
   display: none;
   border: 1px solid var(--line);
