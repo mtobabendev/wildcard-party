@@ -198,6 +198,25 @@
   letter-spacing: .08em;
 }
 
+.comms-presence {
+  color: #777280;
+  font-weight: 900;
+  letter-spacing: .03em;
+}
+
+.comms-presence::before {
+  content: " • ";
+  color: #5f5b68;
+}
+
+.comms-presence.online {
+  color: #8cefb8;
+}
+
+.comms-presence.online::before {
+  color: #6bffb0;
+}
+
 .comms-sigil {
   width: 34px;
   height: 34px;
