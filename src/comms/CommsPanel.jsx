@@ -1096,6 +1096,8 @@ export default function CommsPanel({
     otherReadThrough &&
     compareMessageOrder(otherReadThrough, newestOutgoingMessage) >= 0
   )
+  const currentCallIsCaller = currentCall?.callerAccountId === account?.id
+  const currentCallIsCallee = currentCall?.calleeAccountId === account?.id
 
   if (accountLoading) {
     return (
@@ -1139,6 +1141,97 @@ export default function CommsPanel({
           {error}
           <button type="button" onClick={() => setError('')} aria-label="Dismiss COMMS error">×</button>
         </div>
+      )}
+
+      {(currentCall || callError) && (
+        <section
+          className={`comms-call-strip${currentCall?.status ? ` status-${currentCall.status}` : ' status-error'}`}
+          aria-label="COMMS call state"
+        >
+          {callError && (
+            <div className="comms-call-error" role="alert">
+              <strong>{callError}</strong>
+              <button type="button" onClick={() => setCallError('')}>DISMISS</button>
+            </div>
+          )}
+
+          {currentCall?.status === 'ringing' && currentCallIsCaller && (
+            <>
+              <div className="comms-call-copy">
+                <span>CALLING @{currentCall.otherAccount?.handle || 'account'}</span>
+                <strong>{callKindLabel(currentCall)} CALL</strong>
+                <small>WAITING FOR ANSWER</small>
+              </div>
+              <div className="comms-call-actions">
+                <button
+                  type="button"
+                  onClick={() => actOnCall('cancel')}
+                  disabled={callBusy}
+                >
+                  {callBusy ? 'WORKING…' : 'CANCEL'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {currentCall?.status === 'ringing' && currentCallIsCallee && (
+            <>
+              <div className="comms-call-copy">
+                <span>INCOMING {callKindLabel(currentCall)} CALL</span>
+                <strong>@{currentCall.otherAccount?.handle || 'account'}</strong>
+                <small>CALL SESSION REQUEST</small>
+              </div>
+              <div className="comms-call-actions">
+                <button
+                  type="button"
+                  onClick={() => actOnCall('accept')}
+                  disabled={callBusy}
+                >
+                  {callBusy ? 'WORKING…' : 'ACCEPT'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => actOnCall('decline')}
+                  disabled={callBusy}
+                >
+                  DECLINE
+                </button>
+              </div>
+            </>
+          )}
+
+          {currentCall?.status === 'accepted' && (
+            <>
+              <div className="comms-call-copy">
+                <span>{callKindLabel(currentCall)} CALL</span>
+                <strong>SIGNALING READY</strong>
+                <small>MEDIA CONNECTS IN STAGE 4D.2</small>
+              </div>
+              <div className="comms-call-actions">
+                <button
+                  type="button"
+                  onClick={() => actOnCall('end')}
+                  disabled={callBusy}
+                >
+                  {callBusy ? 'WORKING…' : 'END CALL'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {isTerminalCall(currentCall) && (
+            <>
+              <div className="comms-call-copy">
+                <span>{callKindLabel(currentCall)} CALL</span>
+                <strong>{terminalCallLabel(currentCall)}</strong>
+                <small>@{currentCall.otherAccount?.handle || 'account'}</small>
+              </div>
+              <div className="comms-call-actions">
+                <button type="button" onClick={dismissCallState}>DISMISS</button>
+              </div>
+            </>
+          )}
+        </section>
       )}
 
       <div className="comms-shell">
@@ -1241,7 +1334,7 @@ export default function CommsPanel({
                 <span className="comms-sigil" aria-hidden="true">
                   {initials(selectedConversation.otherAccount)}
                 </span>
-                <div>
+                <div className="comms-chat-party">
                   <strong>{selectedConversation.otherAccount?.displayName}</strong>
                   <small>
                     @{selectedConversation.otherAccount?.handle}
@@ -1252,6 +1345,24 @@ export default function CommsPanel({
                     </span>
                   </small>
                 </div>
+                {!isActiveCall(currentCall) && (
+                  <div className="comms-call-start" aria-label="Start call">
+                    <button
+                      type="button"
+                      onClick={() => startCall('audio')}
+                      disabled={callBusy}
+                    >
+                      AUDIO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startCall('video')}
+                      disabled={callBusy}
+                    >
+                      VIDEO
+                    </button>
+                  </div>
+                )}
               </header>
 
               <div className="comms-history-tools">
