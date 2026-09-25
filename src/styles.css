@@ -62,6 +62,7 @@ body::before {
 .main-nav button.active { color: white; background: rgba(255,79,200,.08); }
 .main-nav button.active span { color: var(--pink); }
 .main-nav button.active::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -11px; height: 2px; background: var(--pink); box-shadow: 0 0 14px var(--pink); }
+.comms-nav-badge { position: absolute; top: 2px; right: 2px; min-width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid rgba(255,79,200,.42); border-radius: 999px; background: #341126; color: #ff9fe5; padding: 0 5px; font-size: 7px; font-weight: 1000; line-height: 1; letter-spacing: 0; box-shadow: 0 0 12px rgba(255,79,200,.16); }
 .top-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; }
 .donate-link { text-decoration: none; padding: 11px 13px; border: 1px solid rgba(255,79,200,.36); border-radius: 12px; color: #ff91de; background: rgba(255,79,200,.06); font-size: 9px; font-weight: 900; letter-spacing: .13em; }
 .round-action { width: 39px; height: 39px; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.05); cursor: pointer; font-weight: 900; color: var(--pink); }
