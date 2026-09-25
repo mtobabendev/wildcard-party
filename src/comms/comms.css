@@ -398,6 +398,63 @@
   white-space: pre-wrap;
 }
 
+.comms-attachment-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 300px;
+  margin-top: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  object-fit: contain;
+}
+
+.comms-file-card {
+  min-width: min(260px, 100%);
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  background: rgba(0,0,0,.16);
+}
+
+.comms-file-card strong {
+  color: #d9d4de;
+  font-size: 8px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.comms-file-card small {
+  color: #817b89;
+  font-size: 7px;
+}
+
+.comms-file-download {
+  display: block;
+  width: fit-content;
+  margin: -5px 0 10px 12px;
+  border: 1px solid rgba(64,217,255,.22);
+  border-radius: 8px;
+  background: rgba(64,217,255,.05);
+  color: #8de7ff;
+  padding: 5px 8px;
+  font-size: 6px;
+  font-weight: 950;
+  letter-spacing: .09em;
+  text-decoration: none;
+}
+
+.comms-file-download.outgoing {
+  margin-left: auto;
+  margin-right: 12px;
+  border-color: rgba(255,79,200,.24);
+  background: rgba(255,79,200,.05);
+  color: #ff9fe5;
+}
+
 .comms-read-receipt {
   display: block;
   margin-top: 6px;
@@ -419,6 +476,41 @@
   max-height: 150px;
   resize: vertical;
   line-height: 1.45;
+}
+
+.comms-attachment-input {
+  display: none;
+}
+
+.comms-attachment-tools {
+  justify-content: flex-start !important;
+  margin-top: 8px;
+}
+
+.comms-pending-attachment {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #aaa4b0;
+  font-size: 7px;
+}
+
+.comms-pending-attachment b {
+  max-width: min(320px, 42vw);
+  overflow: hidden;
+  color: #d8d3dd;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comms-pending-attachment small {
+  white-space: nowrap;
+}
+
+.comms-pending-attachment button {
+  min-width: 0;
+  padding: 5px 7px;
 }
 
 .comms-composer > div {
