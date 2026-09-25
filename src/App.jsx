@@ -366,6 +366,80 @@ function App() {
   }, [account?.id, activeNav])
 
   useEffect(() => {
+    if (!account?.id) return undefined
+
+    let presenceTimer = null
+    let presenceController = null
+
+    const clearPresenceHeartbeat = () => {
+      if (presenceTimer) window.clearInterval(presenceTimer)
+      presenceTimer = null
+      presenceController?.abort()
+      presenceController = null
+    }
+
+    const sendPresenceHeartbeat = async () => {
+      if (document.hidden || presenceController) return
+
+      const controller = new AbortController()
+      presenceController = controller
+
+      try {
+        await fetch('/api/comms/presence', {
+          method: 'POST',
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          console.error('COMMS presence heartbeat failed', error)
+        }
+      } finally {
+        if (presenceController === controller) {
+          presenceController = null
+        }
+      }
+    }
+
+    const startPresenceHeartbeat = () => {
+      if (document.hidden) return
+      sendPresenceHeartbeat()
+      presenceTimer = window.setInterval(sendPresenceHeartbeat, 30000)
+    }
+
+    const restartPresenceHeartbeat = () => {
+      clearPresenceHeartbeat()
+      if (!document.hidden) startPresenceHeartbeat()
+    }
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearPresenceHeartbeat()
+      } else {
+        restartPresenceHeartbeat()
+      }
+    }
+
+    const handleRecovery = () => {
+      if (!document.hidden) restartPresenceHeartbeat()
+    }
+
+    startPresenceHeartbeat()
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleRecovery)
+    window.addEventListener('pageshow', handleRecovery)
+    window.addEventListener('online', handleRecovery)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleRecovery)
+      window.removeEventListener('pageshow', handleRecovery)
+      window.removeEventListener('online', handleRecovery)
+      clearPresenceHeartbeat()
+    }
+  }, [account?.id])
+
+  useEffect(() => {
     if (pennyBusy) return
     try {
       window.sessionStorage.setItem(
