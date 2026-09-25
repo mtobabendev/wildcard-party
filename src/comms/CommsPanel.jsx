@@ -16,7 +16,47 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ])
-const ATTACHMENT_ACCEPT = [...ALLOWED_ATTACHMENT_TYPES].join(',')
+const ATTACHMENT_ACCEPT = [
+  ...ALLOWED_ATTACHMENT_TYPES,
+  'audio/*',
+  'video/*',
+].join(',')
+
+function normalizedAttachmentType(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isAllowedAttachmentType(value) {
+  const type = normalizedAttachmentType(value)
+  return (
+    ALLOWED_ATTACHMENT_TYPES.has(type) ||
+    type.startsWith('audio/') ||
+    type.startsWith('video/')
+  )
+}
+
+const mediaPlaybackSupport = new Map()
+
+function canPlayAttachmentMedia(attachment) {
+  const contentType = normalizedAttachmentType(attachment?.contentType)
+  const mediaKind = attachment?.isAudio
+    ? 'audio'
+    : attachment?.isVideo
+      ? 'video'
+      : ''
+
+  if (!contentType || !mediaKind || typeof document === 'undefined') return false
+
+  const cacheKey = `${mediaKind}:${contentType}`
+  if (mediaPlaybackSupport.has(cacheKey)) {
+    return mediaPlaybackSupport.get(cacheKey)
+  }
+
+  const media = document.createElement(mediaKind)
+  const supported = Boolean(media.canPlayType(contentType))
+  mediaPlaybackSupport.set(cacheKey, supported)
+  return supported
+}
 
 function safeAttachmentName(value) {
   const source = typeof value === 'string' ? value : ''
@@ -593,7 +633,7 @@ export default function CommsPanel({
       return
     }
 
-    if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+    if (!isAllowedAttachmentType(file.type)) {
       setError('That attachment type is not supported.')
       event.target.value = ''
       setAttachmentFile(null)
@@ -631,7 +671,7 @@ export default function CommsPanel({
     }
 
     if (file) {
-      if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+      if (!isAllowedAttachmentType(file.type)) {
         setError('That attachment type is not supported.')
         return
       }
@@ -974,9 +1014,12 @@ export default function CommsPanel({
 
                 {messages.map((message) => {
                   const outgoing = message.senderAccountId === account.id
-                  const attachmentUrl = message.attachment?.id
-                    ? `/api/comms/attachment?id=${encodeURIComponent(message.attachment.id)}`
+                  const attachment = message.attachment
+                  const attachmentUrl = attachment?.id
+                    ? `/api/comms/attachment?id=${encodeURIComponent(attachment.id)}`
                     : ''
+                  const isMedia = Boolean(attachment?.isAudio || attachment?.isVideo)
+                  const canPlayMedia = isMedia && canPlayAttachmentMedia(attachment)
 
                   return (
                     <Fragment key={message.id}>
@@ -985,25 +1028,59 @@ export default function CommsPanel({
                       >
                         <span>{outgoing ? 'YOU' : 'INCOMING'}</span>
                         {message.body && <p>{message.body}</p>}
-                        {message.attachment?.isImage && attachmentUrl && (
+                        {attachment?.isImage && attachmentUrl && (
                           <img
                             className="comms-attachment-image"
                             src={attachmentUrl}
-                            alt={message.attachment.name}
+                            alt={attachment.name}
                             loading="lazy"
                           />
                         )}
-                        {message.attachment && !message.attachment.isImage && (
-                          <div className="comms-file-card" aria-label={message.attachment.name}>
-                            <strong>📎 {message.attachment.name}</strong>
-                            <small>{readableBytes(message.attachment.size)}</small>
+                        {attachment && !attachment.isImage && (
+                          <div className="comms-file-card" aria-label={attachment.name}>
+                            <strong>
+                              {attachment.isAudio ? '♫' : attachment.isVideo ? '▶' : '📎'} {attachment.name}
+                            </strong>
+                            <small>
+                              {attachment.contentType} • {readableBytes(attachment.size)}
+                            </small>
                           </div>
                         )}
                         {outgoing && newestOutgoingRead && message.id === newestOutgoingMessage?.id && (
                           <small className="comms-read-receipt">READ</small>
                         )}
                       </article>
-                      {message.attachment && !message.attachment.isImage && attachmentUrl && (
+
+                      {isMedia && attachmentUrl && (
+                        <div className={`comms-media-actions${outgoing ? ' outgoing' : ''}`}>
+                          {canPlayMedia && attachment.isAudio && (
+                            <audio
+                              className="comms-media-player comms-audio-player"
+                              controls
+                              preload="metadata"
+                              src={attachmentUrl}
+                            />
+                          )}
+                          {canPlayMedia && attachment.isVideo && (
+                            <video
+                              className="comms-media-player comms-video-player"
+                              controls
+                              playsInline
+                              preload="metadata"
+                              src={attachmentUrl}
+                            />
+                          )}
+                          <a
+                            className="comms-file-download"
+                            href={attachmentUrl}
+                            download={attachment.name}
+                          >
+                            DOWNLOAD
+                          </a>
+                        </div>
+                      )}
+
+                      {attachment && !attachment.isImage && !isMedia && attachmentUrl && (
                         <a
                           className={`comms-file-download${outgoing ? ' outgoing' : ''}`}
                           href={attachmentUrl}
