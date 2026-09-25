@@ -20,10 +20,36 @@ function initials(account) {
   return source.trim().slice(0, 2).toUpperCase()
 }
 
+function numericUnreadCount(value) {
+  const count = Number(value)
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
+}
+
+function displayUnreadCount(value) {
+  const count = numericUnreadCount(value)
+  return count > 99 ? '99+' : String(count)
+}
+
+function compareMessageOrder(left, right) {
+  const leftCreatedAt = String(left?.createdAt || '')
+  const rightCreatedAt = String(right?.createdAt || '')
+
+  if (leftCreatedAt !== rightCreatedAt) {
+    return leftCreatedAt > rightCreatedAt ? 1 : -1
+  }
+
+  const leftId = String(left?.id || left?.messageId || '').toLowerCase()
+  const rightId = String(right?.id || right?.messageId || '').toLowerCase()
+
+  if (leftId === rightId) return 0
+  return leftId > rightId ? 1 : -1
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
   onRequireSignIn,
+  onUnreadCountChange,
 }) {
   const [conversations, setConversations] = useState([])
   const [selectedConversation, setSelectedConversation] = useState(null)
@@ -38,6 +64,7 @@ export default function CommsPanel({
   const [search, setSearch] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchBusy, setSearchBusy] = useState(false)
+  const [otherReadThrough, setOtherReadThrough] = useState(null)
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -46,10 +73,23 @@ export default function CommsPanel({
   const messagesRef = useRef([])
   const shouldScrollRef = useRef(false)
   const pendingSendIdsRef = useRef(new Map())
+  const selectedConversationRef = useRef(null)
+  const mobilePaneRef = useRef('list')
+  const readMarkedRef = useRef(new Map())
+  const readInFlightRef = useRef(false)
+  const pendingReadRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  }, [selectedConversation])
+
+  useEffect(() => {
+    mobilePaneRef.current = mobilePane
+  }, [mobilePane])
 
   useEffect(() => () => {
     historyControllerRef.current?.abort()
@@ -64,8 +104,14 @@ export default function CommsPanel({
     setMessages([])
     setHasOlder(false)
     setMobilePane('list')
+    setOtherReadThrough(null)
     setError('')
+    selectedConversationRef.current = null
+    mobilePaneRef.current = 'list'
     pendingSendIdsRef.current.clear()
+    readMarkedRef.current.clear()
+    pendingReadRef.current = null
+    onUnreadCountChange?.(0)
   }, [account?.id])
 
   useEffect(() => {
@@ -108,6 +154,9 @@ export default function CommsPanel({
       const payload = await requestJson('/api/comms/conversations', {}, controller)
       const next = Array.isArray(payload.conversations) ? payload.conversations : []
       setConversations(next)
+      onUnreadCountChange?.(
+        next.reduce((sum, conversation) => sum + numericUnreadCount(conversation.unreadCount), 0),
+      )
       setSelectedConversation((current) => {
         if (!current) return current
         return next.find((conversation) => conversation.id === current.id) || current
@@ -121,6 +170,87 @@ export default function CommsPanel({
     } finally {
       if (!quiet) setConversationBusy(false)
     }
+  }
+
+  async function flushReadQueue() {
+    if (readInFlightRef.current || !pendingReadRef.current) return
+
+    const target = pendingReadRef.current
+    pendingReadRef.current = null
+    readInFlightRef.current = true
+
+    try {
+      const payload = await requestJson('/api/comms/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: target.conversationId,
+          messageId: target.message.id,
+        }),
+      })
+
+      if (payload.readState?.messageId) {
+        const existing = readMarkedRef.current.get(target.conversationId)
+        if (!existing || compareMessageOrder(payload.readState, existing) > 0) {
+          readMarkedRef.current.set(target.conversationId, payload.readState)
+        }
+
+        setConversations((current) => current.map((conversation) => (
+          conversation.id === target.conversationId
+            ? { ...conversation, unreadCount: 0 }
+            : conversation
+        )))
+      }
+
+      if (Number.isFinite(Number(payload.unreadCount))) {
+        onUnreadCountChange?.(numericUnreadCount(payload.unreadCount))
+      }
+    } catch (requestError) {
+      if (requestError?.name !== 'AbortError') {
+        console.error('COMMS read sync failed', requestError)
+      }
+    } finally {
+      readInFlightRef.current = false
+      if (pendingReadRef.current) {
+        flushReadQueue()
+      }
+    }
+  }
+
+  function queueConversationRead(conversationId, message) {
+    if (
+      document.hidden ||
+      !conversationId ||
+      !message?.id ||
+      !message?.createdAt ||
+      selectedConversationRef.current?.id !== conversationId ||
+      mobilePaneRef.current !== 'chat'
+    ) {
+      return
+    }
+
+    const targetMessage = {
+      id: message.id,
+      createdAt: message.createdAt,
+    }
+    const marked = readMarkedRef.current.get(conversationId)
+
+    if (marked && compareMessageOrder(marked, targetMessage) >= 0) return
+
+    const pending = pendingReadRef.current
+    if (
+      pending?.conversationId === conversationId &&
+      compareMessageOrder(pending.message, targetMessage) >= 0
+    ) {
+      return
+    }
+
+    pendingReadRef.current = {
+      conversationId,
+      message: targetMessage,
+    }
+
+    flushReadQueue()
   }
 
   async function pollMessages(conversationId, controller = null) {
@@ -138,11 +268,17 @@ export default function CommsPanel({
         {},
         controller,
       )
+      setOtherReadThrough(payload.otherReadThrough || null)
+
       const incoming = Array.isArray(payload.messages) ? payload.messages : []
       if (!incoming.length) return
 
       shouldScrollRef.current = true
       setMessages((existing) => dedupeMessages([...existing, ...incoming]))
+
+      if (!document.hidden) {
+        queueConversationRead(conversationId, incoming[incoming.length - 1])
+      }
     } catch (requestError) {
       if (requestError?.name !== 'AbortError') {
         setError(requestError?.message || 'New messages could not be checked.')
@@ -254,8 +390,11 @@ export default function CommsPanel({
     historyControllerRef.current = controller
 
     setSelectedConversation(conversation)
+    selectedConversationRef.current = conversation
     setMobilePane('chat')
+    mobilePaneRef.current = 'chat'
     setMessages([])
+    setOtherReadThrough(null)
     setHasOlder(false)
     setHistoryBusy(true)
     setError('')
@@ -271,7 +410,13 @@ export default function CommsPanel({
         Array.isArray(payload.messages) ? payload.messages : [],
       )
       setMessages(initialMessages)
+      setOtherReadThrough(payload.otherReadThrough || null)
       setHasOlder(initialMessages.length === 50)
+
+      const newestMessage = initialMessages[initialMessages.length - 1]
+      if (newestMessage && !document.hidden) {
+        queueConversationRead(conversation.id, newestMessage)
+      }
     } catch (requestError) {
       if (requestError?.name !== 'AbortError') {
         setError(requestError?.message || 'Message history could not be loaded.')
@@ -299,6 +444,7 @@ export default function CommsPanel({
         `/api/comms/messages?conversationId=${encodeURIComponent(conversationId)}&before=${encodeURIComponent(firstMessage.id)}`,
       )
       const older = Array.isArray(payload.messages) ? payload.messages : []
+      setOtherReadThrough(payload.otherReadThrough || null)
 
       setMessages((current) => dedupeMessages([...older, ...current]))
       setHasOlder(older.length === 50)
@@ -416,6 +562,11 @@ export default function CommsPanel({
       shouldScrollRef.current = true
       setMessages((current) => dedupeMessages([...current, payload.message]))
       setDraft('')
+
+      if (!document.hidden) {
+        queueConversationRead(conversationId, payload.message)
+      }
+
       await loadConversations({ quiet: true })
     } catch (requestError) {
       if (
@@ -444,6 +595,15 @@ export default function CommsPanel({
     event.preventDefault()
     sendMessage()
   }
+
+  const newestOutgoingMessage = [...messages]
+    .reverse()
+    .find((message) => message.senderAccountId === account?.id)
+  const newestOutgoingRead = Boolean(
+    newestOutgoingMessage &&
+    otherReadThrough &&
+    compareMessageOrder(otherReadThrough, newestOutgoingMessage) >= 0
+  )
 
   if (accountLoading) {
     return (
@@ -552,6 +712,14 @@ export default function CommsPanel({
                   <small>@{conversation.otherAccount?.handle || 'unknown'}</small>
                   <em>{previewText(conversation.latestMessage)}</em>
                 </span>
+                {numericUnreadCount(conversation.unreadCount) > 0 && (
+                  <span
+                    className="comms-unread-badge"
+                    aria-label={`${numericUnreadCount(conversation.unreadCount)} unread messages`}
+                  >
+                    {displayUnreadCount(conversation.unreadCount)}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -564,7 +732,10 @@ export default function CommsPanel({
                 <button
                   className="comms-back"
                   type="button"
-                  onClick={() => setMobilePane('list')}
+                  onClick={() => {
+                    setMobilePane('list')
+                    mobilePaneRef.current = 'list'
+                  }}
                 >
                   ← BACK
                 </button>
@@ -605,6 +776,9 @@ export default function CommsPanel({
                     >
                       <span>{outgoing ? 'YOU' : 'INCOMING'}</span>
                       <p>{message.body}</p>
+                      {outgoing && newestOutgoingRead && message.id === newestOutgoingMessage?.id && (
+                        <small className="comms-read-receipt">READ</small>
+                      )}
                     </article>
                   )
                 })}
