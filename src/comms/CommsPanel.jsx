@@ -190,6 +190,42 @@ export default function CommsPanel({
     mobilePaneRef.current = mobilePane
   }, [mobilePane])
 
+  useEffect(() => {
+    const viewport = messageViewportRef.current
+    if (!viewport) return undefined
+
+    function handleWheel(event) {
+      if (window.innerWidth <= 820 || event.deltaY === 0) return
+
+      const canScrollUp = viewport.scrollTop > 0
+      const canScrollDown = (
+        viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1
+      )
+
+      const shouldCapture = (
+        (event.deltaY < 0 && canScrollUp) ||
+        (event.deltaY > 0 && canScrollDown)
+      )
+
+      if (!shouldCapture) return
+
+      const delta = event.deltaMode === 1
+        ? event.deltaY * 16
+        : event.deltaMode === 2
+          ? event.deltaY * viewport.clientHeight
+          : event.deltaY
+
+      event.preventDefault()
+      viewport.scrollTop += delta
+    }
+
+    viewport.addEventListener('wheel', handleWheel, { passive: false })
+
+    return () => {
+      viewport.removeEventListener('wheel', handleWheel)
+    }
+  }, [selectedConversation?.id])
+
   useEffect(() => () => {
     historyControllerRef.current?.abort()
     for (const controller of allControllersRef.current) controller.abort()
@@ -795,34 +831,6 @@ export default function CommsPanel({
     sendMessage()
   }
 
-  function handleMessageWheel(event) {
-    if (window.innerWidth <= 820 || event.deltaY === 0) return
-
-    const viewport = messageViewportRef.current
-    if (!viewport) return
-
-    const canScrollUp = viewport.scrollTop > 0
-    const canScrollDown = (
-      viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1
-    )
-
-    if (
-      (event.deltaY < 0 && !canScrollUp) ||
-      (event.deltaY > 0 && !canScrollDown)
-    ) {
-      return
-    }
-
-    const delta = event.deltaMode === 1
-      ? event.deltaY * 16
-      : event.deltaMode === 2
-        ? event.deltaY * viewport.clientHeight
-        : event.deltaY
-
-    event.preventDefault()
-    viewport.scrollTop += delta
-  }
-
   const newestOutgoingMessage = [...messages]
     .reverse()
     .find((message) => message.senderAccountId === account?.id)
@@ -1002,7 +1010,6 @@ export default function CommsPanel({
               <div
                 className="comms-messages"
                 ref={messageViewportRef}
-                onWheelCapture={handleMessageWheel}
               >
                 {historyBusy && messages.length === 0 && (
                   <p className="comms-empty">Loading message history…</p>
