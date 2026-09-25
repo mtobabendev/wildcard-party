@@ -247,6 +247,7 @@ function App() {
   const [accountMode, setAccountMode] = useState('login')
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountError, setAccountError] = useState('')
+  const [commsUnreadCount, setCommsUnreadCount] = useState(0)
   const [accountForm, setAccountForm] = useState({
     displayName: '',
     handle: '',
@@ -274,6 +275,95 @@ function App() {
       loadPersistentPosts(ownerTokenRef.current),
     ])
   }, [])
+
+  useEffect(() => {
+    if (!account?.id) {
+      setCommsUnreadCount(0)
+      return undefined
+    }
+
+    if (activeNav === 'comms') return undefined
+
+    let unreadTimer = null
+    let unreadController = null
+
+    const clearUnreadPolling = () => {
+      if (unreadTimer) window.clearInterval(unreadTimer)
+      unreadTimer = null
+      unreadController?.abort()
+      unreadController = null
+    }
+
+    const refreshUnread = async () => {
+      if (document.hidden || unreadController) return
+
+      const controller = new AbortController()
+      unreadController = controller
+
+      try {
+        const response = await fetch('/api/comms/unread', {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+
+        if (response.status === 401) {
+          setCommsUnreadCount(0)
+          return
+        }
+
+        if (!response.ok) return
+
+        const payload = await response.json().catch(() => ({}))
+        const count = Number(payload.unreadCount)
+        setCommsUnreadCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0)
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          console.error('COMMS unread poll failed', error)
+        }
+      } finally {
+        if (unreadController === controller) {
+          unreadController = null
+        }
+      }
+    }
+
+    const startUnreadPolling = () => {
+      if (document.hidden) return
+      refreshUnread()
+      unreadTimer = window.setInterval(refreshUnread, 12000)
+    }
+
+    const restartUnreadPolling = () => {
+      clearUnreadPolling()
+      if (!document.hidden) startUnreadPolling()
+    }
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearUnreadPolling()
+      } else {
+        startUnreadPolling()
+      }
+    }
+
+    const handleRecovery = () => {
+      restartUnreadPolling()
+    }
+
+    startUnreadPolling()
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleRecovery)
+    window.addEventListener('pageshow', handleRecovery)
+    window.addEventListener('online', handleRecovery)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleRecovery)
+      window.removeEventListener('pageshow', handleRecovery)
+      window.removeEventListener('online', handleRecovery)
+      clearUnreadPolling()
+    }
+  }, [account?.id, activeNav])
 
   useEffect(() => {
     if (pennyBusy) return
@@ -805,17 +895,28 @@ function App() {
         </a>
 
         <nav className="main-nav" aria-label="Primary navigation">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              className={activeNav === item.id ? 'active' : ''}
-              onClick={() => changeSection(item.id)}
-              type="button"
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
+          {navItems.map((item) => {
+            const showUnread = item.id === 'comms' && commsUnreadCount > 0
+            const badgeText = commsUnreadCount > 99 ? '99+' : String(commsUnreadCount)
+
+            return (
+              <button
+                key={item.id}
+                className={activeNav === item.id ? 'active' : ''}
+                onClick={() => changeSection(item.id)}
+                type="button"
+                aria-label={showUnread
+                  ? `COMMS, ${commsUnreadCount} unread message${commsUnreadCount === 1 ? '' : 's'}`
+                  : item.label}
+              >
+                <span>{item.icon}</span>
+                {item.label}
+                {showUnread && (
+                  <b className="comms-nav-badge" aria-hidden="true">{badgeText}</b>
+                )}
+              </button>
+            )
+          })}
         </nav>
 
         <div className="top-actions">
@@ -941,6 +1042,7 @@ function App() {
                   account={account}
                   accountLoading={accountLoading}
                   onRequireSignIn={() => openAccountPanel('login')}
+                  onUnreadCountChange={setCommsUnreadCount}
                 />
               </Suspense>
             )}
