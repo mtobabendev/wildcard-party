@@ -755,6 +755,34 @@ export default function CommsPanel({
     sendMessage()
   }
 
+  function handleMessageWheel(event) {
+    if (window.innerWidth <= 820 || event.deltaY === 0) return
+
+    const viewport = messageViewportRef.current
+    if (!viewport) return
+
+    const canScrollUp = viewport.scrollTop > 0
+    const canScrollDown = (
+      viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1
+    )
+
+    if (
+      (event.deltaY < 0 && !canScrollUp) ||
+      (event.deltaY > 0 && !canScrollDown)
+    ) {
+      return
+    }
+
+    const delta = event.deltaMode === 1
+      ? event.deltaY * 16
+      : event.deltaMode === 2
+        ? event.deltaY * viewport.clientHeight
+        : event.deltaY
+
+    event.preventDefault()
+    viewport.scrollTop += delta
+  }
+
   const newestOutgoingMessage = [...messages]
     .reverse()
     .find((message) => message.senderAccountId === account?.id)
@@ -931,7 +959,11 @@ export default function CommsPanel({
                 )}
               </div>
 
-              <div className="comms-messages" ref={messageViewportRef}>
+              <div
+                className="comms-messages"
+                ref={messageViewportRef}
+                onWheelCapture={handleMessageWheel}
+              >
                 {historyBusy && messages.length === 0 && (
                   <p className="comms-empty">Loading message history…</p>
                 )}
