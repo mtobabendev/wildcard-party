@@ -4,10 +4,12 @@ import {
   sameOrigin,
 } from '../../lib/auth-db.js'
 import {
+  conversationParticipantExists,
   createMessage,
   listMessages,
   normalizeUuid,
 } from '../../lib/comms-db.js'
+import { verifyUploadedAttachment } from '../../lib/comms-storage.js'
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body
@@ -28,8 +30,21 @@ function normalizedBody(value) {
   if (typeof value !== 'string') return ''
   const body = value.trim()
   const length = Array.from(body).length
-  if (length < 1 || length > 4000) return ''
+  if (length > 4000) return null
   return body
+}
+
+function attachmentDescriptor(value) {
+  if (!value || typeof value !== 'object') return null
+
+  const key = typeof value.key === 'string' ? value.key.trim() : ''
+  const originalName = typeof value.originalName === 'string'
+    ? value.originalName
+    : ''
+
+  if (!key || !originalName) return false
+
+  return { key, originalName }
 }
 
 export default async function handler(req, res) {
@@ -92,19 +107,43 @@ export default async function handler(req, res) {
     const conversationId = normalizeUuid(body.conversationId)
     const clientMessageId = normalizeUuid(body.clientMessageId)
     const text = normalizedBody(body.body)
+    const requestedAttachment = attachmentDescriptor(body.attachment)
 
-    if (!conversationId || !clientMessageId || !text) {
+    if (!conversationId || !clientMessageId || text === null || requestedAttachment === false) {
       return res.status(400).json({
-        error: 'conversationId, clientMessageId, and 1–4000 characters of text are required.',
+        error: 'Valid message identifiers, up to 4000 characters of text, and a valid attachment descriptor are required.',
+      })
+    }
+
+    if (!text && !requestedAttachment) {
+      return res.status(400).json({
+        error: 'A message must contain text or one valid attachment.',
       })
     }
 
     try {
+      let attachment = null
+
+      if (requestedAttachment) {
+        const authorized = await conversationParticipantExists(account.id, conversationId)
+        if (!authorized) {
+          return res.status(404).json({ error: 'Conversation not found.' })
+        }
+
+        attachment = await verifyUploadedAttachment({
+          key: requestedAttachment.key,
+          conversationId,
+          accountId: account.id,
+          originalName: requestedAttachment.originalName,
+        })
+      }
+
       const result = await createMessage({
         accountId: account.id,
         conversationId,
         clientMessageId,
         body: text,
+        attachment,
       })
 
       return res
@@ -119,6 +158,17 @@ export default async function handler(req, res) {
       }
       if (error?.code === 'INVALID_MESSAGE_IDENTIFIERS') {
         return res.status(400).json({ error: 'Message identifiers are invalid.' })
+      }
+      if (error?.code === 'STORAGE_NOT_CONFIGURED') {
+        return res.status(503).json({ error: 'Private COMMS storage is not configured for this runtime.' })
+      }
+      if ([
+        'ATTACHMENT_KEY_INVALID',
+        'ATTACHMENT_NOT_FOUND',
+        'ATTACHMENT_TYPE_INVALID',
+        'ATTACHMENT_SIZE_INVALID',
+      ].includes(error?.code)) {
+        return res.status(400).json({ error: 'The uploaded attachment could not be verified.' })
       }
       throw error
     }
