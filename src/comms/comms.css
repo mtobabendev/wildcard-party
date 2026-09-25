@@ -236,8 +236,24 @@
 }
 
 .comms-conversation-list > button {
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   margin-bottom: 3px;
+}
+
+.comms-unread-badge {
+  min-width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  border: 1px solid rgba(255,79,200,.32);
+  border-radius: 999px;
+  background: rgba(255,79,200,.12);
+  color: #ff9ce3;
+  padding: 0 6px;
+  font-size: 7px;
+  font-weight: 1000;
+  letter-spacing: .02em;
 }
 
 .comms-conversation-copy em {
@@ -361,6 +377,16 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.comms-read-receipt {
+  display: block;
+  margin-top: 6px;
+  color: #ff8fdd;
+  font-size: 6px;
+  font-weight: 1000;
+  letter-spacing: .12em;
+  text-align: right;
 }
 
 .comms-composer {
