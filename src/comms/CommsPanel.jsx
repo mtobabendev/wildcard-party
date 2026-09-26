@@ -164,6 +164,25 @@ function terminalCallLabel(call) {
   return 'CALL CLOSED'
 }
 
+function mediaStateLabel(call, state) {
+  if (state === 'preparing') return 'PREPARING MEDIA'
+  if (state === 'waiting-offer') return 'CONNECTING MEDIA'
+  if (state === 'connecting') {
+    return call?.kind === 'video' ? 'CONNECTING VIDEO' : 'CONNECTING AUDIO'
+  }
+  if (state === 'live') {
+    return call?.kind === 'video' ? 'VIDEO LIVE' : 'AUDIO LIVE'
+  }
+  if (state === 'interrupted') return 'MEDIA CONNECTION INTERRUPTED'
+  if (state === 'failed') return 'MEDIA CONNECTION FAILED'
+  if (state === 'redial') return 'MEDIA SESSION NEEDS REDIAL'
+  return 'SIGNALING READY'
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -189,6 +208,14 @@ export default function CommsPanel({
   const [currentCall, setCurrentCall] = useState(null)
   const [callBusy, setCallBusy] = useState(false)
   const [callError, setCallError] = useState('')
+  const [mediaState, setMediaState] = useState('idle')
+  const [mediaError, setMediaError] = useState('')
+  const [mediaMuted, setMediaMuted] = useState(false)
+  const [cameraEnabled, setCameraEnabled] = useState(true)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const [mediaRevision, setMediaRevision] = useState(0)
+  const [signalPollingReady, setSignalPollingReady] = useState(false)
+  const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -206,6 +233,23 @@ export default function CommsPanel({
   const currentCallRef = useRef(null)
   const pendingCallIdsRef = useRef(new Map())
   const terminalCallTimerRef = useRef(null)
+  const peerConnectionRef = useRef(null)
+  const localStreamRef = useRef(null)
+  const remoteStreamRef = useRef(null)
+  const mediaCallIdRef = useRef(null)
+  const mediaBootstrapControllerRef = useRef(null)
+  const signalPollControllerRef = useRef(null)
+  const signalCursorRef = useRef('0')
+  const pendingRemoteCandidatesRef = useRef([])
+  const pendingLocalCandidatesRef = useRef([])
+  const localSdpStoredRef = useRef(false)
+  const remoteOfferRef = useRef(null)
+  const remoteAnswerRef = useRef(null)
+  const mediaSetupPromiseRef = useRef(null)
+  const signalSendChainRef = useRef(Promise.resolve())
+  const remoteAudioRef = useRef(null)
+  const remoteVideoRef = useRef(null)
+  const localVideoRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -276,6 +320,7 @@ export default function CommsPanel({
     mobilePaneRef.current = 'list'
     pendingSendIdsRef.current.clear()
     pendingCallIdsRef.current.clear()
+    cleanupMediaSession()
     readMarkedRef.current.clear()
     pendingReadRef.current = null
     currentCallRef.current = null
@@ -322,6 +367,19 @@ export default function CommsPanel({
   }
 
   function setCanonicalCall(call) {
+    const previousCall = currentCallRef.current
+
+    if (
+      mediaCallIdRef.current &&
+      (
+        !call ||
+        call.status !== 'accepted' ||
+        (previousCall?.id && previousCall.id !== call.id)
+      )
+    ) {
+      cleanupMediaSession()
+    }
+
     if (terminalCallTimerRef.current) {
       window.clearTimeout(terminalCallTimerRef.current)
       terminalCallTimerRef.current = null
