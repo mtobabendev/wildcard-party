@@ -1009,11 +1009,9 @@ export default function CommsPanel({
         await processRemoteSignal(call, signal)
       }
 
-      if (!sawOffer && mediaState !== 'device-error') {
+      if (!sawOffer) {
         setMediaState('waiting-offer')
-      }
-
-      if (mediaError) {
+      } else if (!peerConnectionRef.current) {
         setSignalPollingReady(false)
       }
     } catch (requestError) {
@@ -1471,11 +1469,125 @@ export default function CommsPanel({
     }
   }, [account?.id])
 
+  useEffect(() => {
+    const localVideo = localVideoRef.current
+    const localStream = localStreamRef.current
+
+    if (localVideo && localStream && localVideo.srcObject !== localStream) {
+      localVideo.srcObject = localStream
+      localVideo.muted = true
+      const playResult = localVideo.play()
+      playResult?.catch?.(() => {})
+    }
+
+    const call = currentCallRef.current
+    const remoteStream = remoteStreamRef.current
+    const remoteElement = call?.kind === 'video'
+      ? remoteVideoRef.current
+      : remoteAudioRef.current
+
+    if (remoteElement && remoteStream && remoteElement.srcObject !== remoteStream) {
+      remoteElement.srcObject = remoteStream
+    }
+
+    if (remoteStream?.getTracks?.().length) {
+      window.setTimeout(() => {
+        attemptRemotePlayback()
+      }, 0)
+    }
+  }, [currentCall?.id, currentCall?.kind, mediaRevision])
+
+  useEffect(() => {
+    const call = currentCall
+    if (!account?.id || call?.status !== 'accepted') {
+      if (mediaCallIdRef.current) {
+        cleanupMediaSession()
+      }
+      return undefined
+    }
+
+    const controller = new AbortController()
+    mediaBootstrapControllerRef.current?.abort()
+    mediaBootstrapControllerRef.current = controller
+
+    bootstrapAcceptedMedia(call, controller)
+
+    return () => {
+      if (mediaBootstrapControllerRef.current === controller) {
+        controller.abort()
+        mediaBootstrapControllerRef.current = null
+      }
+    }
+  }, [account?.id, currentCall?.id, currentCall?.status, mediaRetryNonce])
+
+  useEffect(() => {
+    const call = currentCall
+    if (
+      !account?.id ||
+      call?.status !== 'accepted' ||
+      !signalPollingReady
+    ) {
+      return undefined
+    }
+
+    let timer = null
+    let controller = null
+    let inFlight = false
+    const cadence = mediaState === 'live' ? 5000 : 900
+
+    const pollSignals = async () => {
+      if (document.hidden || inFlight) return
+
+      inFlight = true
+      controller = new AbortController()
+      signalPollControllerRef.current = controller
+
+      try {
+        await pollSignalCatchup(call, controller)
+      } catch (requestError) {
+        if (
+          requestError?.name !== 'AbortError' &&
+          requestError?.code !== 'SIGNAL_STATE_CONFLICT'
+        ) {
+          console.error('COMMS media signaling poll failed', {
+            code: requestError?.code || null,
+            name: requestError?.name || null,
+            status: requestError?.status || null,
+          })
+        }
+      } finally {
+        if (signalPollControllerRef.current === controller) {
+          signalPollControllerRef.current = null
+        }
+        controller = null
+        inFlight = false
+      }
+    }
+
+    pollSignals()
+    timer = window.setInterval(pollSignals, cadence)
+
+    return () => {
+      if (timer) window.clearInterval(timer)
+      controller?.abort()
+      if (signalPollControllerRef.current === controller) {
+        signalPollControllerRef.current = null
+      }
+    }
+  }, [
+    account?.id,
+    currentCall?.id,
+    currentCall?.status,
+    signalPollingReady,
+    mediaState,
+  ])
+
   useEffect(() => () => {
     if (terminalCallTimerRef.current) {
       window.clearTimeout(terminalCallTimerRef.current)
       terminalCallTimerRef.current = null
     }
+    cleanupMediaSession({ resetState: false })
   }, [])
 
   async function selectConversation(conversation) {
