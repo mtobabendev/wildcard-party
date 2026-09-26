@@ -2442,6 +2442,16 @@ export default function CommsPanel({
                   />
                   <div className="comms-audio-diagnostics" aria-label="Live audio path diagnostics">
                     <strong>AUDIO PATH</strong>
+                    <div className="comms-audio-diagnostic-meta">
+                      <span>
+                        DIAGNOSTICS
+                        <b>{diagnosticSamplerLabel(audioDiagnostics.samplerStatus)}</b>
+                      </span>
+                      <span>
+                        STATS
+                        <b>{diagnosticStatsLabel(audioDiagnostics.statsStatus)}</b>
+                      </span>
+                    </div>
                     <dl>
                       <div>
                         <dt>MIC</dt>
@@ -2449,7 +2459,7 @@ export default function CommsPanel({
                       </div>
                       <div>
                         <dt>SENDER</dt>
-                        <dd>{audioDiagnostics.senderAttached ? 'ATTACHED' : 'MISSING'}</dd>
+                        <dd>{senderDiagnosticLabel(audioDiagnostics)}</dd>
                       </div>
                       <div>
                         <dt>TX</dt>
@@ -2465,7 +2475,7 @@ export default function CommsPanel({
                       </div>
                       <div>
                         <dt>PLAYBACK</dt>
-                        <dd>{playbackDiagnosticLabel(audioDiagnostics.playback)}</dd>
+                        <dd>{playbackDiagnosticLabel(audioDiagnostics)}</dd>
                       </div>
                     </dl>
                     <small>
