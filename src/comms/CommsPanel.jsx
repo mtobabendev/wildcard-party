@@ -203,6 +203,34 @@ function emptyAudioDiagnostics() {
   }
 }
 
+function microphoneDiagnosticLabel(diagnostic) {
+  if (!diagnostic.micExists) return 'MISSING'
+  if (diagnostic.micReadyState === 'ended') return 'ENDED'
+  if (!diagnostic.micEnabled || diagnostic.micMuted) return 'MUTED'
+  return 'LIVE'
+}
+
+function remoteTrackDiagnosticLabel(diagnostic) {
+  if (!diagnostic.remoteTrackExists) return 'MISSING'
+  if (diagnostic.remoteTrackReadyState === 'ended') return 'ENDED'
+  if (!diagnostic.remoteTrackEnabled || diagnostic.remoteTrackMuted) return 'MUTED'
+  return 'LIVE'
+}
+
+function audioFlowDiagnosticLabel(value) {
+  if (value === 'flowing') return 'FLOWING'
+  if (value === 'no-flow') return 'NO FLOW'
+  if (value === 'muted') return 'MUTED'
+  return 'WAITING'
+}
+
+function playbackDiagnosticLabel(value) {
+  if (value === 'playing') return 'PLAYING'
+  if (value === 'paused') return 'PAUSED'
+  if (value === 'muted') return 'MUTED'
+  return 'NO MEDIA'
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -2282,12 +2310,49 @@ export default function CommsPanel({
               </div>
 
               {currentCall.kind === 'audio' && (
-                <audio
-                  ref={remoteAudioRef}
-                  className="comms-live-audio"
-                  autoPlay
-                  aria-label="Remote call audio"
-                />
+                <>
+                  <audio
+                    ref={remoteAudioRef}
+                    className="comms-live-audio"
+                    autoPlay
+                    controls
+                    aria-label="Remote call audio"
+                  />
+                  <div className="comms-audio-diagnostics" aria-label="Live audio path diagnostics">
+                    <strong>AUDIO PATH</strong>
+                    <dl>
+                      <div>
+                        <dt>MIC</dt>
+                        <dd>{microphoneDiagnosticLabel(audioDiagnostics)}</dd>
+                      </div>
+                      <div>
+                        <dt>SENDER</dt>
+                        <dd>{audioDiagnostics.senderAttached ? 'ATTACHED' : 'MISSING'}</dd>
+                      </div>
+                      <div>
+                        <dt>TX</dt>
+                        <dd>{audioFlowDiagnosticLabel(audioDiagnostics.txFlow)}</dd>
+                      </div>
+                      <div>
+                        <dt>REMOTE TRACK</dt>
+                        <dd>{remoteTrackDiagnosticLabel(audioDiagnostics)}</dd>
+                      </div>
+                      <div>
+                        <dt>RX</dt>
+                        <dd>{audioFlowDiagnosticLabel(audioDiagnostics.rxFlow)}</dd>
+                      </div>
+                      <div>
+                        <dt>PLAYBACK</dt>
+                        <dd>{playbackDiagnosticLabel(audioDiagnostics.playback)}</dd>
+                      </div>
+                    </dl>
+                    <small>
+                      VOLUME {Math.round(audioDiagnostics.playbackVolume * 100)}%
+                      {' · '}
+                      READY {audioDiagnostics.playbackReadyState}
+                    </small>
+                  </div>
+                </>
               )}
 
               {currentCall.kind === 'video' && (
@@ -2323,7 +2388,13 @@ export default function CommsPanel({
                   </button>
                 )}
 
-                {autoplayBlocked && (
+                {currentCall.kind === 'audio' && audioDiagnostics.remoteTrackExists && (
+                  <button type="button" onClick={startRemoteAudio}>
+                    START AUDIO
+                  </button>
+                )}
+
+                {currentCall.kind === 'video' && autoplayBlocked && (
                   <button type="button" onClick={resumeRemotePlayback}>
                     TAP TO HEAR
                   </button>
