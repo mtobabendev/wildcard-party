@@ -1912,6 +1912,8 @@ export default function CommsPanel({
   )
   const currentCallIsCaller = currentCall?.callerAccountId === account?.id
   const currentCallIsCallee = currentCall?.calleeAccountId === account?.id
+  const hasLocalAudio = Boolean(localStreamRef.current?.getAudioTracks?.().length)
+  const hasLocalVideo = Boolean(localStreamRef.current?.getVideoTracks?.().length)
 
   if (accountLoading) {
     return (
@@ -2016,12 +2018,76 @@ export default function CommsPanel({
 
           {currentCall?.status === 'accepted' && (
             <>
-              <div className="comms-call-copy">
-                <span>{callKindLabel(currentCall)} CALL</span>
-                <strong>SIGNALING READY</strong>
-                <small>MEDIA CONNECTS IN STAGE 4D.2</small>
+              <div className="comms-call-copy comms-call-media-copy">
+                <span>
+                  {callKindLabel(currentCall)} CALL WITH @{currentCall.otherAccount?.handle || 'account'}
+                </span>
+                <strong>{mediaStateLabel(currentCall, mediaState)}</strong>
+                <small>
+                  {mediaError || (
+                    mediaState === 'live'
+                      ? 'PEER MEDIA CONNECTED'
+                      : mediaState === 'redial'
+                        ? 'END THIS CALL AND START A FRESH MEDIA SESSION'
+                        : 'DIRECT WEBRTC // STUN ONLY'
+                  )}
+                </small>
               </div>
-              <div className="comms-call-actions">
+
+              {currentCall.kind === 'audio' && (
+                <audio
+                  ref={remoteAudioRef}
+                  className="comms-live-audio"
+                  autoPlay
+                  aria-label="Remote call audio"
+                />
+              )}
+
+              {currentCall.kind === 'video' && (
+                <div className="comms-live-video-stage">
+                  <video
+                    ref={remoteVideoRef}
+                    className="comms-live-video-remote"
+                    autoPlay
+                    playsInline
+                    aria-label="Remote call video"
+                  />
+                  <video
+                    ref={localVideoRef}
+                    className="comms-live-video-local"
+                    autoPlay
+                    playsInline
+                    muted
+                    aria-label="Local muted video preview"
+                  />
+                </div>
+              )}
+
+              <div className="comms-call-actions comms-live-call-actions">
+                {hasLocalAudio && mediaState !== 'redial' && (
+                  <button type="button" onClick={toggleMicrophone}>
+                    {mediaMuted ? 'UNMUTE' : 'MUTE'}
+                  </button>
+                )}
+
+                {currentCall.kind === 'video' && hasLocalVideo && mediaState !== 'redial' && (
+                  <button type="button" onClick={toggleCamera}>
+                    {cameraEnabled ? 'CAMERA OFF' : 'CAMERA ON'}
+                  </button>
+                )}
+
+                {autoplayBlocked && (
+                  <button type="button" onClick={resumeRemotePlayback}>
+                    TAP TO HEAR
+                  </button>
+                )}
+
+                {mediaState === 'device-error' && (
+                  <button type="button" onClick={retryMedia}>
+                    RETRY MEDIA
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => actOnCall('end')}
