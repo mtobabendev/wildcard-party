@@ -186,31 +186,57 @@ function sleep(milliseconds) {
 
 function emptyAudioDiagnostics() {
   return {
+    samplerStatus: 'starting',
+    statsStatus: 'waiting',
+    micChecked: false,
     micExists: false,
     micEnabled: false,
     micMuted: false,
-    micReadyState: 'missing',
+    micReadyState: 'waiting',
+    senderChecked: false,
     senderAttached: false,
     txFlow: 'waiting',
+    remoteTrackChecked: false,
     remoteTrackExists: false,
     remoteTrackEnabled: false,
     remoteTrackMuted: false,
-    remoteTrackReadyState: 'missing',
+    remoteTrackReadyState: 'waiting',
     rxFlow: 'waiting',
-    playback: 'no-media',
+    playbackChecked: false,
+    playback: 'waiting',
     playbackVolume: 1,
     playbackReadyState: 0,
   }
 }
 
+function diagnosticSamplerLabel(value) {
+  if (value === 'running') return 'RUNNING'
+  if (value === 'peer-waiting') return 'PEER WAITING'
+  if (value === 'error') return 'ERROR'
+  return 'STARTING'
+}
+
+function diagnosticStatsLabel(value) {
+  if (value === 'ok') return 'OK'
+  if (value === 'unavailable') return 'UNAVAILABLE'
+  return 'WAITING'
+}
+
 function microphoneDiagnosticLabel(diagnostic) {
+  if (!diagnostic.micChecked) return 'WAITING'
   if (!diagnostic.micExists) return 'MISSING'
   if (diagnostic.micReadyState === 'ended') return 'ENDED'
   if (!diagnostic.micEnabled || diagnostic.micMuted) return 'MUTED'
   return 'LIVE'
 }
 
+function senderDiagnosticLabel(diagnostic) {
+  if (!diagnostic.senderChecked) return 'WAITING'
+  return diagnostic.senderAttached ? 'ATTACHED' : 'MISSING'
+}
+
 function remoteTrackDiagnosticLabel(diagnostic) {
+  if (!diagnostic.remoteTrackChecked) return 'WAITING'
   if (!diagnostic.remoteTrackExists) return 'MISSING'
   if (diagnostic.remoteTrackReadyState === 'ended') return 'ENDED'
   if (!diagnostic.remoteTrackEnabled || diagnostic.remoteTrackMuted) return 'MUTED'
@@ -221,13 +247,15 @@ function audioFlowDiagnosticLabel(value) {
   if (value === 'flowing') return 'FLOWING'
   if (value === 'no-flow') return 'NO FLOW'
   if (value === 'muted') return 'MUTED'
+  if (value === 'stats-unavailable') return 'STATS UNAVAILABLE'
   return 'WAITING'
 }
 
-function playbackDiagnosticLabel(value) {
-  if (value === 'playing') return 'PLAYING'
-  if (value === 'paused') return 'PAUSED'
-  if (value === 'muted') return 'MUTED'
+function playbackDiagnosticLabel(diagnostic) {
+  if (!diagnostic.playbackChecked || diagnostic.playback === 'waiting') return 'WAITING'
+  if (diagnostic.playback === 'playing') return 'PLAYING'
+  if (diagnostic.playback === 'paused') return 'PAUSED'
+  if (diagnostic.playback === 'muted') return 'MUTED'
   return 'NO MEDIA'
 }
 
@@ -1592,13 +1620,11 @@ export default function CommsPanel({
 
   useEffect(() => {
     const call = currentCall
-    const peer = peerConnectionRef.current
 
     if (
       !account?.id ||
       call?.status !== 'accepted' ||
-      call.kind !== 'audio' ||
-      !peer
+      call.kind !== 'audio'
     ) {
       if (audioDiagnosticTimerRef.current) {
         window.clearInterval(audioDiagnosticTimerRef.current)
@@ -1606,6 +1632,20 @@ export default function CommsPanel({
       }
       audioStatsSnapshotRef.current = null
       setAudioDiagnostics(emptyAudioDiagnostics())
+      return undefined
+    }
+
+    const peer = peerConnectionRef.current
+    if (!peer) {
+      if (audioDiagnosticTimerRef.current) {
+        window.clearInterval(audioDiagnosticTimerRef.current)
+        audioDiagnosticTimerRef.current = null
+      }
+      audioStatsSnapshotRef.current = null
+      setAudioDiagnostics({
+        ...emptyAudioDiagnostics(),
+        samplerStatus: 'peer-waiting',
+      })
       return undefined
     }
 
@@ -1635,20 +1675,111 @@ export default function CommsPanel({
 
       inFlight = true
 
+      let micChecked = false
+      let localTrack = null
       try {
-        const localTrack = localStreamRef.current?.getAudioTracks?.()[0] || null
-        const remoteStream = remoteStreamRef.current
-        const remoteTrack = remoteStream?.getAudioTracks?.()[0] || null
-        const audio = remoteAudioRef.current
+        localTrack = localStreamRef.current?.getAudioTracks?.()[0] || null
+        micChecked = true
+      } catch {
+        // Keep this gauge WAITING if the local track cannot be inspected.
+      }
 
-        if (audio && remoteStream && remoteTrack && audio.srcObject !== remoteStream) {
-          audio.srcObject = remoteStream
-        }
-
-        const senderAttached = peer.getSenders().some(
+      let senderChecked = false
+      let senderAttached = false
+      try {
+        senderAttached = peer.getSenders().some(
           (sender) => sender.track?.kind === 'audio',
         )
+        senderChecked = true
+      } catch {
+        // Keep this gauge WAITING if sender inspection is unavailable.
+      }
 
+      let remoteTrackChecked = false
+      let remoteStream = null
+      let remoteTrack = null
+      try {
+        remoteStream = remoteStreamRef.current
+        remoteTrack = remoteStream?.getAudioTracks?.()[0] || null
+        remoteTrackChecked = Boolean(remoteStream)
+      } catch {
+        // Keep this gauge WAITING if the remote stream cannot be inspected.
+      }
+
+      let playbackChecked = false
+      let playback = 'waiting'
+      let playbackVolume = 1
+      let playbackReadyState = 0
+
+      try {
+        const audio = remoteAudioRef.current
+
+        if (audio) {
+          playbackChecked = true
+
+          if (remoteStream && remoteTrack && audio.srcObject !== remoteStream) {
+            audio.srcObject = remoteStream
+          }
+
+          playback = !remoteTrack || audio.srcObject !== remoteStream
+            ? 'no-media'
+            : audio.muted
+              ? 'muted'
+              : audio.paused
+                ? 'paused'
+                : 'playing'
+          playbackVolume = Number.isFinite(audio.volume) ? audio.volume : 1
+          playbackReadyState = Number.isFinite(audio.readyState) ? audio.readyState : 0
+        }
+      } catch {
+        // Keep playback WAITING if the media element cannot be inspected.
+      }
+
+      const micIntentionallyMuted = Boolean(
+        micChecked &&
+        localTrack &&
+        (!localTrack.enabled || localTrack.muted),
+      )
+
+      if (!cancelled) {
+        setAudioDiagnostics((current) => ({
+          ...current,
+          samplerStatus: 'running',
+          micChecked,
+          micExists: micChecked ? Boolean(localTrack) : current.micExists,
+          micEnabled: micChecked ? Boolean(localTrack?.enabled) : current.micEnabled,
+          micMuted: micChecked ? Boolean(localTrack?.muted) : current.micMuted,
+          micReadyState: micChecked
+            ? localTrack?.readyState || 'missing'
+            : current.micReadyState,
+          senderChecked,
+          senderAttached: senderChecked ? senderAttached : current.senderAttached,
+          remoteTrackChecked,
+          remoteTrackExists: remoteTrackChecked
+            ? Boolean(remoteTrack)
+            : current.remoteTrackExists,
+          remoteTrackEnabled: remoteTrackChecked
+            ? Boolean(remoteTrack?.enabled)
+            : current.remoteTrackEnabled,
+          remoteTrackMuted: remoteTrackChecked
+            ? Boolean(remoteTrack?.muted)
+            : current.remoteTrackMuted,
+          remoteTrackReadyState: remoteTrackChecked
+            ? remoteTrack?.readyState || 'missing'
+            : current.remoteTrackReadyState,
+          playbackChecked,
+          playback: playbackChecked ? playback : current.playback,
+          playbackVolume: playbackChecked
+            ? playbackVolume
+            : current.playbackVolume,
+          playbackReadyState: playbackChecked
+            ? playbackReadyState
+            : current.playbackReadyState,
+          txFlow: micIntentionallyMuted ? 'muted' : current.txFlow,
+        }))
+      }
+
+      try {
         const stats = await peer.getStats()
         let outboundSeen = false
         let inboundSeen = false
@@ -1673,14 +1804,10 @@ export default function CommsPanel({
         })
 
         const previous = audioStatsSnapshotRef.current
-        const warm = (
+        const warm = Boolean(
           previous &&
           previous.samples >= 1 &&
           Date.now() - previous.startedAt >= 2500
-        )
-
-        const micIntentionallyMuted = Boolean(
-          localTrack && (!localTrack.enabled || localTrack.muted),
         )
 
         const txFlow = micIntentionallyMuted
@@ -1709,14 +1836,6 @@ export default function CommsPanel({
             ? 'flowing'
             : 'no-flow'
 
-        const playback = !audio || !remoteTrack || audio.srcObject !== remoteStream
-          ? 'no-media'
-          : audio.muted
-            ? 'muted'
-            : audio.paused
-              ? 'paused'
-              : 'playing'
-
         audioStatsSnapshotRef.current = {
           bytesSent,
           packetsSent,
@@ -1727,25 +1846,28 @@ export default function CommsPanel({
         }
 
         if (!cancelled) {
-          setAudioDiagnostics({
-            micExists: Boolean(localTrack),
-            micEnabled: Boolean(localTrack?.enabled),
-            micMuted: Boolean(localTrack?.muted),
-            micReadyState: localTrack?.readyState || 'missing',
-            senderAttached,
+          setAudioDiagnostics((current) => ({
+            ...current,
+            samplerStatus: 'running',
+            statsStatus: 'ok',
             txFlow,
-            remoteTrackExists: Boolean(remoteTrack),
-            remoteTrackEnabled: Boolean(remoteTrack?.enabled),
-            remoteTrackMuted: Boolean(remoteTrack?.muted),
-            remoteTrackReadyState: remoteTrack?.readyState || 'missing',
             rxFlow,
-            playback,
-            playbackVolume: Number.isFinite(audio?.volume) ? audio.volume : 1,
-            playbackReadyState: Number.isFinite(audio?.readyState) ? audio.readyState : 0,
-          })
+          }))
         }
-      } catch {
-        // Diagnostic sampling is non-authoritative and must not disturb the call.
+      } catch (statsError) {
+        if (!cancelled) {
+          setAudioDiagnostics((current) => ({
+            ...current,
+            samplerStatus: 'running',
+            statsStatus: 'unavailable',
+            txFlow: micIntentionallyMuted ? 'muted' : 'stats-unavailable',
+            rxFlow: 'stats-unavailable',
+          }))
+        }
+
+        console.warn('COMMS audio diagnostics stats unavailable', {
+          name: statsError?.name || null,
+        })
       } finally {
         inFlight = false
       }
