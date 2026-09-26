@@ -184,6 +184,25 @@ function sleep(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+function emptyAudioDiagnostics() {
+  return {
+    micExists: false,
+    micEnabled: false,
+    micMuted: false,
+    micReadyState: 'missing',
+    senderAttached: false,
+    txFlow: 'waiting',
+    remoteTrackExists: false,
+    remoteTrackEnabled: false,
+    remoteTrackMuted: false,
+    remoteTrackReadyState: 'missing',
+    rxFlow: 'waiting',
+    playback: 'no-media',
+    playbackVolume: 1,
+    playbackReadyState: 0,
+  }
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -217,6 +236,7 @@ export default function CommsPanel({
   const [mediaRevision, setMediaRevision] = useState(0)
   const [signalPollingReady, setSignalPollingReady] = useState(false)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
+  const [audioDiagnostics, setAudioDiagnostics] = useState(() => emptyAudioDiagnostics())
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -251,6 +271,8 @@ export default function CommsPanel({
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
+  const audioDiagnosticTimerRef = useRef(null)
+  const audioStatsSnapshotRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -415,6 +437,12 @@ export default function CommsPanel({
   }
 
   function cleanupMediaSession({ resetState = true } = {}) {
+    if (audioDiagnosticTimerRef.current) {
+      window.clearInterval(audioDiagnosticTimerRef.current)
+      audioDiagnosticTimerRef.current = null
+    }
+    audioStatsSnapshotRef.current = null
+
     mediaBootstrapControllerRef.current?.abort()
     signalPollControllerRef.current?.abort()
     mediaBootstrapControllerRef.current = null
@@ -462,6 +490,7 @@ export default function CommsPanel({
       setMediaMuted(false)
       setCameraEnabled(true)
       setAutoplayBlocked(false)
+      setAudioDiagnostics(emptyAudioDiagnostics())
       setMediaRevision((value) => value + 1)
     }
   }
