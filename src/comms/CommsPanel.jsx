@@ -175,6 +175,7 @@ function mediaStateLabel(call, state) {
   }
   if (state === 'interrupted') return 'MEDIA CONNECTION INTERRUPTED'
   if (state === 'failed') return 'MEDIA CONNECTION FAILED'
+  if (state === 'device-error') return 'MEDIA SETUP REQUIRED'
   if (state === 'redial') return 'MEDIA SESSION NEEDS REDIAL'
   return 'SIGNALING READY'
 }
@@ -591,6 +592,7 @@ export default function CommsPanel({
       return
     }
 
+    setSignalPollingReady(false)
     setMediaState('failed')
     setMediaError(
       requestError?.code === 'SIGNAL_STATE_CONFLICT'
@@ -680,6 +682,7 @@ export default function CommsPanel({
     }
 
     if (peer.connectionState === 'failed' || peer.iceConnectionState === 'failed') {
+      setSignalPollingReady(false)
       setMediaState('failed')
       setMediaError('DIRECT MEDIA PATH FAILED')
       return
@@ -868,6 +871,7 @@ export default function CommsPanel({
           await peer.setRemoteDescription(signal.payload)
           await flushRemoteCandidates()
         } catch {
+          setSignalPollingReady(false)
           setMediaState('failed')
           setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
         }
@@ -889,6 +893,7 @@ export default function CommsPanel({
       try {
         await peer.addIceCandidate(signal.payload)
       } catch {
+        setSignalPollingReady(false)
         setMediaState('failed')
         setMediaError('MEDIA CANDIDATE FAILED')
       }
