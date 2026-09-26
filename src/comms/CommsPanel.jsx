@@ -1088,6 +1088,38 @@ export default function CommsPanel({
     await attemptRemotePlayback()
   }
 
+  async function startRemoteAudio() {
+    const audio = remoteAudioRef.current
+    const remoteStream = remoteStreamRef.current
+    if (!audio || !remoteStream?.getAudioTracks?.().length) return
+
+    if (audio.srcObject !== remoteStream) {
+      audio.srcObject = remoteStream
+    }
+
+    audio.muted = false
+    audio.volume = 1
+
+    try {
+      const playResult = audio.play()
+      if (playResult?.then) await playResult
+      setAutoplayBlocked(false)
+    } catch {
+      setAutoplayBlocked(true)
+    }
+
+    setAudioDiagnostics((current) => ({
+      ...current,
+      playback: audio.muted
+        ? 'muted'
+        : audio.paused
+          ? 'paused'
+          : 'playing',
+      playbackVolume: audio.volume,
+      playbackReadyState: audio.readyState,
+    }))
+  }
+
   async function startCall(kind) {
     const conversationId = selectedConversationRef.current?.id
     if (!conversationId || isActiveCall(currentCallRef.current) || callBusy) return
@@ -1529,6 +1561,187 @@ export default function CommsPanel({
       }, 0)
     }
   }, [currentCall?.id, currentCall?.kind, mediaRevision])
+
+  useEffect(() => {
+    const call = currentCall
+    const peer = peerConnectionRef.current
+
+    if (
+      !account?.id ||
+      call?.status !== 'accepted' ||
+      call.kind !== 'audio' ||
+      !peer
+    ) {
+      if (audioDiagnosticTimerRef.current) {
+        window.clearInterval(audioDiagnosticTimerRef.current)
+        audioDiagnosticTimerRef.current = null
+      }
+      audioStatsSnapshotRef.current = null
+      setAudioDiagnostics(emptyAudioDiagnostics())
+      return undefined
+    }
+
+    let cancelled = false
+    let inFlight = false
+    const startedAt = Date.now()
+
+    audioStatsSnapshotRef.current = {
+      bytesSent: 0,
+      packetsSent: 0,
+      bytesReceived: 0,
+      packetsReceived: 0,
+      samples: 0,
+      startedAt,
+    }
+
+    const sampleAudioPath = async () => {
+      if (
+        cancelled ||
+        inFlight ||
+        peerConnectionRef.current !== peer ||
+        currentCallRef.current?.id !== call.id ||
+        currentCallRef.current?.status !== 'accepted'
+      ) {
+        return
+      }
+
+      inFlight = true
+
+      try {
+        const localTrack = localStreamRef.current?.getAudioTracks?.()[0] || null
+        const remoteStream = remoteStreamRef.current
+        const remoteTrack = remoteStream?.getAudioTracks?.()[0] || null
+        const audio = remoteAudioRef.current
+
+        if (audio && remoteStream && remoteTrack && audio.srcObject !== remoteStream) {
+          audio.srcObject = remoteStream
+        }
+
+        const senderAttached = peer.getSenders().some(
+          (sender) => sender.track?.kind === 'audio',
+        )
+
+        const stats = await peer.getStats()
+        let outboundSeen = false
+        let inboundSeen = false
+        let bytesSent = 0
+        let packetsSent = 0
+        let bytesReceived = 0
+        let packetsReceived = 0
+
+        stats.forEach((report) => {
+          const kind = report.kind || report.mediaType
+          if (kind !== 'audio' || report.isRemote) return
+
+          if (report.type === 'outbound-rtp') {
+            outboundSeen = true
+            bytesSent += Number(report.bytesSent) || 0
+            packetsSent += Number(report.packetsSent) || 0
+          } else if (report.type === 'inbound-rtp') {
+            inboundSeen = true
+            bytesReceived += Number(report.bytesReceived) || 0
+            packetsReceived += Number(report.packetsReceived) || 0
+          }
+        })
+
+        const previous = audioStatsSnapshotRef.current
+        const warm = (
+          previous &&
+          previous.samples >= 1 &&
+          Date.now() - previous.startedAt >= 2500
+        )
+
+        const micIntentionallyMuted = Boolean(
+          localTrack && (!localTrack.enabled || localTrack.muted),
+        )
+
+        const txFlow = micIntentionallyMuted
+          ? 'muted'
+          : !warm
+            ? 'waiting'
+            : (
+                outboundSeen &&
+                (
+                  bytesSent > previous.bytesSent ||
+                  packetsSent > previous.packetsSent
+                )
+              )
+              ? 'flowing'
+              : 'no-flow'
+
+        const rxFlow = !warm
+          ? 'waiting'
+          : (
+              inboundSeen &&
+              (
+                bytesReceived > previous.bytesReceived ||
+                packetsReceived > previous.packetsReceived
+              )
+            )
+            ? 'flowing'
+            : 'no-flow'
+
+        const playback = !audio || !remoteTrack || audio.srcObject !== remoteStream
+          ? 'no-media'
+          : audio.muted
+            ? 'muted'
+            : audio.paused
+              ? 'paused'
+              : 'playing'
+
+        audioStatsSnapshotRef.current = {
+          bytesSent,
+          packetsSent,
+          bytesReceived,
+          packetsReceived,
+          samples: (previous?.samples || 0) + 1,
+          startedAt: previous?.startedAt || startedAt,
+        }
+
+        if (!cancelled) {
+          setAudioDiagnostics({
+            micExists: Boolean(localTrack),
+            micEnabled: Boolean(localTrack?.enabled),
+            micMuted: Boolean(localTrack?.muted),
+            micReadyState: localTrack?.readyState || 'missing',
+            senderAttached,
+            txFlow,
+            remoteTrackExists: Boolean(remoteTrack),
+            remoteTrackEnabled: Boolean(remoteTrack?.enabled),
+            remoteTrackMuted: Boolean(remoteTrack?.muted),
+            remoteTrackReadyState: remoteTrack?.readyState || 'missing',
+            rxFlow,
+            playback,
+            playbackVolume: Number.isFinite(audio?.volume) ? audio.volume : 1,
+            playbackReadyState: Number.isFinite(audio?.readyState) ? audio.readyState : 0,
+          })
+        }
+      } catch {
+        // Diagnostic sampling is non-authoritative and must not disturb the call.
+      } finally {
+        inFlight = false
+      }
+    }
+
+    sampleAudioPath()
+    const timer = window.setInterval(sampleAudioPath, 1000)
+    audioDiagnosticTimerRef.current = timer
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      if (audioDiagnosticTimerRef.current === timer) {
+        audioDiagnosticTimerRef.current = null
+      }
+      audioStatsSnapshotRef.current = null
+    }
+  }, [
+    account?.id,
+    currentCall?.id,
+    currentCall?.status,
+    currentCall?.kind,
+    mediaRevision,
+  ])
 
   useEffect(() => {
     const call = currentCall
