@@ -962,7 +962,6 @@ export default function CommsPanel({
   }
 
   async function bootstrapAcceptedMedia(call, controller) {
-    cleanupMediaSession()
     mediaCallIdRef.current = call.id
     setMediaState('preparing')
     setMediaError('')
@@ -1506,8 +1505,9 @@ export default function CommsPanel({
       return undefined
     }
 
+    cleanupMediaSession()
+
     const controller = new AbortController()
-    mediaBootstrapControllerRef.current?.abort()
     mediaBootstrapControllerRef.current = controller
 
     bootstrapAcceptedMedia(call, controller)
