@@ -413,6 +413,650 @@ export default function CommsPanel({
     return requestError?.message || 'CALL REQUEST FAILED'
   }
 
+  function cleanupMediaSession({ resetState = true } = {}) {
+    mediaBootstrapControllerRef.current?.abort()
+    signalPollControllerRef.current?.abort()
+    mediaBootstrapControllerRef.current = null
+    signalPollControllerRef.current = null
+
+    const peer = peerConnectionRef.current
+    if (peer) {
+      peer.onicecandidate = null
+      peer.ontrack = null
+      peer.onconnectionstatechange = null
+      peer.oniceconnectionstatechange = null
+
+      try {
+        peer.close()
+      } catch {
+        // Peer cleanup is best-effort.
+      }
+    }
+
+    for (const track of localStreamRef.current?.getTracks?.() || []) {
+      track.stop()
+    }
+
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+    if (localVideoRef.current) localVideoRef.current.srcObject = null
+
+    peerConnectionRef.current = null
+    localStreamRef.current = null
+    remoteStreamRef.current = null
+    mediaCallIdRef.current = null
+    mediaSetupPromiseRef.current = null
+    signalCursorRef.current = '0'
+    pendingRemoteCandidatesRef.current = []
+    pendingLocalCandidatesRef.current = []
+    localSdpStoredRef.current = false
+    remoteOfferRef.current = null
+    remoteAnswerRef.current = null
+    signalSendChainRef.current = Promise.resolve()
+
+    if (resetState) {
+      setSignalPollingReady(false)
+      setMediaState('idle')
+      setMediaError('')
+      setMediaMuted(false)
+      setCameraEnabled(true)
+      setAutoplayBlocked(false)
+      setMediaRevision((value) => value + 1)
+    }
+  }
+
+  function mediaPermissionError(call, requestError) {
+    if (requestError?.name === 'NotAllowedError') {
+      return call?.kind === 'video'
+        ? 'CAMERA / MICROPHONE PERMISSION REQUIRED'
+        : 'MICROPHONE PERMISSION REQUIRED'
+    }
+
+    if (
+      requestError?.name === 'NotFoundError' ||
+      requestError?.name === 'NotReadableError'
+    ) {
+      return 'MEDIA DEVICE UNAVAILABLE'
+    }
+
+    return 'MEDIA SETUP FAILED'
+  }
+
+  function mediaConstraints(call) {
+    const audio = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    }
+
+    if (call?.kind === 'video') {
+      return {
+        audio,
+        video: {
+          facingMode: {
+            ideal: 'user',
+          },
+        },
+      }
+    }
+
+    return {
+      audio,
+      video: false,
+    }
+  }
+
+  async function acquireLocalMedia(call) {
+    if (
+      localStreamRef.current &&
+      mediaCallIdRef.current === call.id
+    ) {
+      return localStreamRef.current
+    }
+
+    setMediaState('preparing')
+    setMediaError('')
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMediaState('device-error')
+      setMediaError('MEDIA DEVICE UNAVAILABLE')
+      return null
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints(call))
+
+      if (
+        currentCallRef.current?.id !== call.id ||
+        currentCallRef.current?.status !== 'accepted'
+      ) {
+        for (const track of stream.getTracks()) track.stop()
+        return null
+      }
+
+      mediaCallIdRef.current = call.id
+      localStreamRef.current = stream
+      setMediaMuted(false)
+      setCameraEnabled(true)
+      setMediaRevision((value) => value + 1)
+      return stream
+    } catch (requestError) {
+      setMediaState('device-error')
+      setMediaError(mediaPermissionError(call, requestError))
+      return null
+    }
+  }
+
+  async function postSignalWithRetry(call, type, payload, clientSignalId = crypto.randomUUID()) {
+    let lastError = null
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await requestJson('/api/comms/call-signals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callId: call.id,
+            clientSignalId,
+            type,
+            payload,
+          }),
+        })
+
+        if (!response.signal?.sequence) {
+          throw new Error('The server did not return the canonical signal.')
+        }
+
+        return response.signal
+      } catch (requestError) {
+        lastError = requestError
+        const retryable = (
+          requestError?.name !== 'AbortError' &&
+          (!requestError?.status || requestError.status >= 500)
+        )
+
+        if (!retryable || attempt === 2) throw requestError
+        await sleep(250 * (attempt + 1))
+      }
+    }
+
+    throw lastError || new Error('Signal could not be stored.')
+  }
+
+  function markSignalingFailure(requestError) {
+    if (
+      currentCallRef.current?.status !== 'accepted' ||
+      requestError?.name === 'AbortError'
+    ) {
+      return
+    }
+
+    setMediaState('failed')
+    setMediaError(
+      requestError?.code === 'SIGNAL_STATE_CONFLICT'
+        ? 'MEDIA SIGNALING STATE CHANGED'
+        : 'MEDIA SIGNALING FAILED',
+    )
+  }
+
+  function enqueueIceSignal(call, candidate) {
+    signalSendChainRef.current = signalSendChainRef.current
+      .then(() => postSignalWithRetry(call, 'ice', candidate))
+      .catch((requestError) => {
+        markSignalingFailure(requestError)
+      })
+
+    return signalSendChainRef.current
+  }
+
+  async function flushLocalCandidates(call) {
+    const queued = pendingLocalCandidatesRef.current
+    pendingLocalCandidatesRef.current = []
+
+    for (const candidate of queued) {
+      await postSignalWithRetry(call, 'ice', candidate)
+    }
+  }
+
+  async function flushRemoteCandidates() {
+    const peer = peerConnectionRef.current
+    if (!peer?.remoteDescription) return
+
+    const queued = pendingRemoteCandidatesRef.current
+      .slice()
+      .sort((left, right) => {
+        const leftSequence = BigInt(left.sequence)
+        const rightSequence = BigInt(right.sequence)
+        if (leftSequence === rightSequence) return 0
+        return leftSequence < rightSequence ? -1 : 1
+      })
+
+    pendingRemoteCandidatesRef.current = []
+
+    for (const item of queued) {
+      await peer.addIceCandidate(item.payload)
+    }
+  }
+
+  async function attemptRemotePlayback() {
+    const call = currentCallRef.current
+    if (call?.status !== 'accepted') return
+
+    const remoteElement = call.kind === 'video'
+      ? remoteVideoRef.current
+      : remoteAudioRef.current
+    const remoteStream = remoteStreamRef.current
+
+    if (!remoteElement || !remoteStream || remoteStream.getTracks().length === 0) return
+
+    if (remoteElement.srcObject !== remoteStream) {
+      remoteElement.srcObject = remoteStream
+    }
+
+    try {
+      const playResult = remoteElement.play()
+      if (playResult?.then) await playResult
+      setAutoplayBlocked(false)
+    } catch {
+      setAutoplayBlocked(true)
+    }
+  }
+
+  function updatePeerConnectionState(call, peer) {
+    if (
+      mediaCallIdRef.current !== call.id ||
+      currentCallRef.current?.status !== 'accepted'
+    ) {
+      return
+    }
+
+    if (peer.connectionState === 'connected') {
+      setMediaState('live')
+      setMediaError('')
+      window.setTimeout(() => {
+        attemptRemotePlayback()
+      }, 0)
+      return
+    }
+
+    if (peer.connectionState === 'failed' || peer.iceConnectionState === 'failed') {
+      setMediaState('failed')
+      setMediaError('DIRECT MEDIA PATH FAILED')
+      return
+    }
+
+    if (
+      peer.connectionState === 'disconnected' ||
+      peer.iceConnectionState === 'disconnected'
+    ) {
+      setMediaState('interrupted')
+      return
+    }
+
+    if (
+      peer.connectionState === 'connecting' ||
+      peer.iceConnectionState === 'checking'
+    ) {
+      setMediaState('connecting')
+    }
+  }
+
+  function createPeerConnectionForCall(call, localStream) {
+    if (
+      peerConnectionRef.current &&
+      mediaCallIdRef.current === call.id
+    ) {
+      return peerConnectionRef.current
+    }
+
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: 'stun:stun.cloudflare.com:3478',
+        },
+      ],
+    })
+    const remoteStream = new MediaStream()
+
+    mediaCallIdRef.current = call.id
+    peerConnectionRef.current = peer
+    remoteStreamRef.current = remoteStream
+
+    peer.onicecandidate = (event) => {
+      if (!event.candidate) return
+
+      const candidate = event.candidate.toJSON()
+      if (!localSdpStoredRef.current) {
+        pendingLocalCandidatesRef.current.push(candidate)
+        return
+      }
+
+      enqueueIceSignal(call, candidate)
+    }
+
+    peer.ontrack = (event) => {
+      const targetStream = remoteStreamRef.current
+      if (!targetStream) return
+
+      const tracks = event.streams?.[0]?.getTracks?.() || [event.track]
+      for (const track of tracks) {
+        if (!track || targetStream.getTracks().some((current) => current.id === track.id)) {
+          continue
+        }
+        targetStream.addTrack(track)
+      }
+
+      setMediaRevision((value) => value + 1)
+      window.setTimeout(() => {
+        attemptRemotePlayback()
+      }, 0)
+    }
+
+    peer.onconnectionstatechange = () => {
+      updatePeerConnectionState(call, peer)
+    }
+
+    peer.oniceconnectionstatechange = () => {
+      updatePeerConnectionState(call, peer)
+    }
+
+    for (const track of localStream.getTracks()) {
+      peer.addTrack(track, localStream)
+    }
+
+    setMediaState('connecting')
+    setMediaRevision((value) => value + 1)
+    return peer
+  }
+
+  async function beginCallerMedia(call) {
+    if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
+
+    mediaSetupPromiseRef.current = (async () => {
+      const stream = await acquireLocalMedia(call)
+      if (!stream) return false
+
+      try {
+        const peer = createPeerConnectionForCall(call, stream)
+        const offer = await peer.createOffer()
+        await peer.setLocalDescription(offer)
+
+        await postSignalWithRetry(call, 'offer', {
+          type: peer.localDescription.type,
+          sdp: peer.localDescription.sdp,
+        })
+
+        localSdpStoredRef.current = true
+        await flushLocalCandidates(call)
+        setMediaState('connecting')
+        return true
+      } catch (requestError) {
+        markSignalingFailure(requestError)
+        return false
+      }
+    })().finally(() => {
+      mediaSetupPromiseRef.current = null
+    })
+
+    return mediaSetupPromiseRef.current
+  }
+
+  async function beginCalleeMedia(call, offerPayload) {
+    remoteOfferRef.current = offerPayload
+
+    if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
+
+    mediaSetupPromiseRef.current = (async () => {
+      const stream = await acquireLocalMedia(call)
+      if (!stream) return false
+
+      try {
+        const peer = createPeerConnectionForCall(call, stream)
+        await peer.setRemoteDescription(offerPayload)
+        await flushRemoteCandidates()
+
+        const answer = await peer.createAnswer()
+        await peer.setLocalDescription(answer)
+
+        await postSignalWithRetry(call, 'answer', {
+          type: peer.localDescription.type,
+          sdp: peer.localDescription.sdp,
+        })
+
+        localSdpStoredRef.current = true
+        await flushLocalCandidates(call)
+        setMediaState('connecting')
+        return true
+      } catch (requestError) {
+        markSignalingFailure(requestError)
+        return false
+      }
+    })().finally(() => {
+      mediaSetupPromiseRef.current = null
+    })
+
+    return mediaSetupPromiseRef.current
+  }
+
+  async function processRemoteSignal(call, signal) {
+    if (!signal?.sequence || signal.senderAccountId === account?.id) return
+
+    if (signal.type === 'offer') {
+      remoteOfferRef.current = signal.payload
+
+      if (call.calleeAccountId === account?.id) {
+        await beginCalleeMedia(call, signal.payload)
+      }
+      return
+    }
+
+    if (signal.type === 'answer') {
+      remoteAnswerRef.current = signal.payload
+
+      if (call.callerAccountId !== account?.id) return
+
+      const peer = peerConnectionRef.current
+      if (!peer) {
+        setSignalPollingReady(false)
+        setMediaState('redial')
+        setMediaError('')
+        return
+      }
+
+      if (!peer.remoteDescription) {
+        try {
+          await peer.setRemoteDescription(signal.payload)
+          await flushRemoteCandidates()
+        } catch {
+          setMediaState('failed')
+          setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
+        }
+      }
+      return
+    }
+
+    if (signal.type === 'ice') {
+      const peer = peerConnectionRef.current
+
+      if (!peer?.remoteDescription) {
+        pendingRemoteCandidatesRef.current.push({
+          sequence: signal.sequence,
+          payload: signal.payload,
+        })
+        return
+      }
+
+      try {
+        await peer.addIceCandidate(signal.payload)
+      } catch {
+        setMediaState('failed')
+        setMediaError('MEDIA CANDIDATE FAILED')
+      }
+    }
+  }
+
+  async function fetchSignalBacklog(callId, after = '0', controller = null) {
+    let cursor = after
+    const signals = []
+
+    while (true) {
+      const payload = await requestJson(
+        `/api/comms/call-signals?callId=${encodeURIComponent(callId)}&after=${encodeURIComponent(cursor)}`,
+        {},
+        controller,
+      )
+
+      const page = Array.isArray(payload.signals) ? payload.signals : []
+      signals.push(...page)
+
+      const nextAfter = typeof payload.nextAfter === 'string'
+        ? payload.nextAfter
+        : cursor
+
+      if (nextAfter === cursor && payload.hasMore) {
+        throw new Error('Signal cursor did not advance.')
+      }
+
+      cursor = nextAfter
+      if (!payload.hasMore) break
+    }
+
+    return {
+      signals,
+      nextAfter: cursor,
+    }
+  }
+
+  async function pollSignalCatchup(call, controller = null) {
+    let cursor = signalCursorRef.current
+
+    while (true) {
+      const payload = await requestJson(
+        `/api/comms/call-signals?callId=${encodeURIComponent(call.id)}&after=${encodeURIComponent(cursor)}`,
+        {},
+        controller,
+      )
+
+      const signals = Array.isArray(payload.signals) ? payload.signals : []
+
+      for (const signal of signals) {
+        await processRemoteSignal(call, signal)
+        cursor = signal.sequence
+        signalCursorRef.current = cursor
+      }
+
+      const nextAfter = typeof payload.nextAfter === 'string'
+        ? payload.nextAfter
+        : cursor
+
+      if (signals.length === 0) {
+        cursor = nextAfter
+        signalCursorRef.current = cursor
+      }
+
+      if (!payload.hasMore) break
+      if (nextAfter === cursor && signals.length === 0) {
+        throw new Error('Signal cursor did not advance.')
+      }
+    }
+  }
+
+  async function bootstrapAcceptedMedia(call, controller) {
+    cleanupMediaSession()
+    mediaCallIdRef.current = call.id
+    setMediaState('preparing')
+    setMediaError('')
+
+    try {
+      const backlog = await fetchSignalBacklog(call.id, '0', controller)
+      signalCursorRef.current = backlog.nextAfter
+
+      if (
+        currentCallRef.current?.id !== call.id ||
+        currentCallRef.current?.status !== 'accepted'
+      ) {
+        return
+      }
+
+      const caller = call.callerAccountId === account?.id
+      const ownOffer = backlog.signals.find(
+        (signal) => signal.type === 'offer' && signal.senderAccountId === account?.id,
+      )
+      const ownAnswer = backlog.signals.find(
+        (signal) => signal.type === 'answer' && signal.senderAccountId === account?.id,
+      )
+
+      if ((caller && ownOffer) || (!caller && ownAnswer)) {
+        setSignalPollingReady(false)
+        setMediaState('redial')
+        setMediaError('')
+        return
+      }
+
+      if (caller) {
+        const started = await beginCallerMedia(call)
+        setSignalPollingReady(Boolean(started))
+        return
+      }
+
+      setSignalPollingReady(true)
+
+      let sawOffer = false
+      for (const signal of backlog.signals) {
+        if (signal.type === 'offer' && signal.senderAccountId !== account?.id) {
+          sawOffer = true
+        }
+        await processRemoteSignal(call, signal)
+      }
+
+      if (!sawOffer && mediaState !== 'device-error') {
+        setMediaState('waiting-offer')
+      }
+
+      if (mediaError) {
+        setSignalPollingReady(false)
+      }
+    } catch (requestError) {
+      if (requestError?.name !== 'AbortError') {
+        markSignalingFailure(requestError)
+      }
+    }
+  }
+
+  function retryMedia() {
+    const call = currentCallRef.current
+    if (call?.status !== 'accepted') return
+
+    cleanupMediaSession()
+    setMediaRetryNonce((value) => value + 1)
+  }
+
+  function toggleMicrophone() {
+    const tracks = localStreamRef.current?.getAudioTracks?.() || []
+    if (!tracks.length) return
+
+    const nextEnabled = mediaMuted
+    for (const track of tracks) {
+      track.enabled = nextEnabled
+    }
+    setMediaMuted(!nextEnabled)
+  }
+
+  function toggleCamera() {
+    const tracks = localStreamRef.current?.getVideoTracks?.() || []
+    if (!tracks.length) return
+
+    const nextEnabled = !cameraEnabled
+    for (const track of tracks) {
+      track.enabled = nextEnabled
+    }
+    setCameraEnabled(nextEnabled)
+  }
+
+  async function resumeRemotePlayback() {
+    await attemptRemotePlayback()
+  }
+
   async function startCall(kind) {
     const conversationId = selectedConversationRef.current?.id
     if (!conversationId || isActiveCall(currentCallRef.current) || callBusy) return
