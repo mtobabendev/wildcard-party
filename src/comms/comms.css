@@ -444,6 +444,61 @@
   height: 34px;
 }
 
+.comms-audio-diagnostics {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid rgba(107,255,176,.14);
+  border-radius: 9px;
+  background: rgba(107,255,176,.025);
+}
+
+.comms-audio-diagnostics > strong {
+  color: #aef6c9;
+  font-size: 7px;
+  letter-spacing: .1em;
+}
+
+.comms-audio-diagnostics dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px 10px;
+  margin: 0;
+}
+
+.comms-audio-diagnostics dl > div {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+
+.comms-audio-diagnostics dt,
+.comms-audio-diagnostics dd {
+  margin: 0;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .06em;
+}
+
+.comms-audio-diagnostics dt {
+  color: #777280;
+}
+
+.comms-audio-diagnostics dd {
+  color: #e1dce6;
+  text-align: right;
+}
+
+.comms-audio-diagnostics > small {
+  color: #716d77;
+  font-size: 6px;
+  letter-spacing: .04em;
+}
+
 .comms-live-video-stage {
   position: relative;
   flex: 1 1 320px;
