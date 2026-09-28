@@ -211,57 +211,6 @@ function emptyAudioDiagnostics() {
   }
 }
 
-function emptyCandidateDiagnostics() {
-  return {
-    localTotal: 0, localHost: 0, localSrflx: 0, localPrflx: 0, localRelay: 0,
-    localUnknown: 0, localProtocol: 'UNKNOWN', localEoc: 'NO',
-    persisted: 0, persistFail: 0,
-    remoteTotal: 0, remoteHost: 0, remoteSrflx: 0, remotePrflx: 0, remoteRelay: 0,
-    remoteUnknown: 0, remoteProtocol: 'UNKNOWN',
-    addAttempts: 0, addSuccess: 0, addFail: 0, lastAddError: 'NONE',
-  }
-}
-
-function classifyDiagnosticCandidate(candidate) {
-  let type = diagnosticRead(() => candidate.type)
-  let protocol = diagnosticRead(() => candidate.protocol)
-  try {
-    const tokens = typeof candidate?.candidate === 'string'
-      ? candidate.candidate.trim().split(/\s+/) : []
-    if (tokens[0]?.startsWith('candidate:')) {
-      if (!['host', 'srflx', 'prflx', 'relay'].includes(type)) {
-        const typeIndex = tokens.indexOf('typ', 6)
-        type = typeIndex >= 0 ? tokens[typeIndex + 1] : 'UNKNOWN'
-      }
-      if (!['udp', 'tcp'].includes(String(protocol).toLowerCase())) protocol = tokens[2]
-    }
-  } catch {
-    // Only classification is optional; never interfere with the candidate.
-  }
-  return {
-    type: ['host', 'srflx', 'prflx', 'relay'].includes(type) ? type : 'unknown',
-    protocol: ['udp', 'tcp'].includes(String(protocol).toLowerCase())
-      ? String(protocol).toUpperCase() : 'UNKNOWN',
-  }
-}
-
-function countDiagnosticCandidate(values, side, candidate) {
-  const { type, protocol } = classifyDiagnosticCandidate(candidate)
-  values[side + 'Total'] += 1
-  values[side + type[0].toUpperCase() + type.slice(1)] += 1
-  const protocols = values[side + 'Protocol'].split('/')
-  values[side + 'Protocol'] = [...new Set([...protocols, protocol])]
-    .filter((item) => item !== 'UNKNOWN').sort().join('/') || 'UNKNOWN'
-}
-
-function diagnosticIceErrorName(error) {
-  const name = diagnosticRead(() => error.name)
-  // Never echo arbitrary error text, which can contain endpoint details.
-  return ['Error', 'TypeError', 'OperationError', 'InvalidStateError',
-    'SyntaxError', 'NotSupportedError', 'InvalidAccessError', 'AbortError',
-    'NetworkError', 'SecurityError', 'RTCError'].includes(name) ? name : 'UNKNOWN'
-}
-
 function diagnosticRead(read) {
   try {
     const value = read()
@@ -439,33 +388,6 @@ export default function CommsPanel({
   const [signalPollingReady, setSignalPollingReady] = useState(false)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
   const [audioDiagnostics, setAudioDiagnostics] = useState(() => emptyAudioDiagnostics())
-
-  const [candidateDiagnostics, setCandidateDiagnostics] = useState(emptyCandidateDiagnostics)
-  const candidateDiagnosticsRef = useRef(null)
-
-  function observeCandidateDiagnostics(session, observe) {
-    try {
-      if (!session || session !== candidateDiagnosticsRef.current ||
-        session.callId !== currentCallRef.current?.id) return
-      observe(session.values, session)
-      setCandidateDiagnostics({ ...session.values })
-    } catch {
-      // Diagnostic bookkeeping must never prevent the existing call path.
-    }
-  }
-
-  function observeRemoteCandidates(session, signals) {
-    observeCandidateDiagnostics(session, (values, diagnostic) => {
-      for (const signal of signals) {
-        if (signal.type !== 'ice' || !signal.sequence ||
-          signal.senderAccountId === account?.id) continue
-        const key = String(signal.sequence)
-        if (diagnostic.remoteSeen.has(key)) continue
-        diagnostic.remoteSeen.add(key)
-        countDiagnosticCandidate(values, 'remote', signal.payload)
-      }
-    })
-  }
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -666,12 +588,6 @@ export default function CommsPanel({
   }
 
   function cleanupMediaSession({ resetState = true } = {}) {
-    try {
-      candidateDiagnosticsRef.current = null
-      setCandidateDiagnostics(emptyCandidateDiagnostics())
-    } catch {
-      // Diagnostics must not interfere with session cleanup.
-    }
     if (audioDiagnosticTimerRef.current) {
       window.clearInterval(audioDiagnosticTimerRef.current)
       audioDiagnosticTimerRef.current = null
@@ -813,7 +729,6 @@ export default function CommsPanel({
   }
 
   async function postSignalWithRetry(call, type, payload, clientSignalId = crypto.randomUUID()) {
-    const diagnosticSession = candidateDiagnosticsRef.current
     let lastError = null
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -833,13 +748,6 @@ export default function CommsPanel({
           throw new Error('The server did not return the canonical signal.')
         }
 
-        if (type === 'ice') {
-          observeCandidateDiagnostics(diagnosticSession, (values, diagnostic) => {
-            if (diagnostic.callId !== call.id || diagnostic.persistedSeen.has(clientSignalId)) return
-            diagnostic.persistedSeen.add(clientSignalId)
-            values.persisted += 1
-          })
-        }
         return response.signal
       } catch (requestError) {
         lastError = requestError
@@ -848,14 +756,7 @@ export default function CommsPanel({
           (!requestError?.status || requestError.status >= 500)
         )
 
-        if (!retryable || attempt === 2) {
-          if (type === 'ice') {
-            observeCandidateDiagnostics(diagnosticSession, (values, diagnostic) => {
-              if (diagnostic.callId === call.id) values.persistFail += 1
-            })
-          }
-          throw requestError
-        }
+        if (!retryable || attempt === 2) throw requestError
         await sleep(250 * (attempt + 1))
       }
     }
@@ -900,7 +801,6 @@ export default function CommsPanel({
   }
 
   async function flushRemoteCandidates() {
-    const diagnosticSession = candidateDiagnosticsRef.current
     const peer = peerConnectionRef.current
     if (!peer?.remoteDescription) return
 
@@ -916,17 +816,7 @@ export default function CommsPanel({
     pendingRemoteCandidatesRef.current = []
 
     for (const item of queued) {
-      observeCandidateDiagnostics(diagnosticSession, (values) => { values.addAttempts += 1 })
-      try {
-        await peer.addIceCandidate(item.payload)
-        observeCandidateDiagnostics(diagnosticSession, (values) => { values.addSuccess += 1 })
-      } catch (candidateError) {
-        observeCandidateDiagnostics(diagnosticSession, (values) => {
-          values.addFail += 1
-          values.lastAddError = diagnosticIceErrorName(candidateError)
-        })
-        throw candidateError
-      }
+      await peer.addIceCandidate(item.payload)
     }
   }
 
@@ -1015,12 +905,7 @@ export default function CommsPanel({
     peerConnectionRef.current = peer
     remoteStreamRef.current = remoteStream
 
-    const diagnosticSession = candidateDiagnosticsRef.current
     peer.onicecandidate = (event) => {
-      observeCandidateDiagnostics(diagnosticSession, (values) => {
-        if (event.candidate === null) values.localEoc = 'YES'
-        else if (event.candidate) countDiagnosticCandidate(values, 'local', event.candidate)
-      })
       if (!event.candidate) return
 
       const candidate = event.candidate.toJSON()
@@ -1175,7 +1060,6 @@ export default function CommsPanel({
     }
 
     if (signal.type === 'ice') {
-      const diagnosticSession = candidateDiagnosticsRef.current
       const peer = peerConnectionRef.current
 
       if (!peer?.remoteDescription) {
@@ -1186,15 +1070,9 @@ export default function CommsPanel({
         return
       }
 
-      observeCandidateDiagnostics(diagnosticSession, (values) => { values.addAttempts += 1 })
       try {
         await peer.addIceCandidate(signal.payload)
-        observeCandidateDiagnostics(diagnosticSession, (values) => { values.addSuccess += 1 })
-      } catch (candidateError) {
-        observeCandidateDiagnostics(diagnosticSession, (values) => {
-          values.addFail += 1
-          values.lastAddError = diagnosticIceErrorName(candidateError)
-        })
+      } catch {
         setSignalPollingReady(false)
         setMediaState('failed')
         setMediaError('MEDIA CANDIDATE FAILED')
@@ -1203,7 +1081,6 @@ export default function CommsPanel({
   }
 
   async function fetchSignalBacklog(callId, after = '0', controller = null) {
-    const diagnosticSession = candidateDiagnosticsRef.current
     let cursor = after
     const signals = []
 
@@ -1215,7 +1092,6 @@ export default function CommsPanel({
       )
 
       const page = Array.isArray(payload.signals) ? payload.signals : []
-      observeRemoteCandidates(diagnosticSession, page)
       signals.push(...page)
 
       const nextAfter = typeof payload.nextAfter === 'string'
@@ -1237,7 +1113,6 @@ export default function CommsPanel({
   }
 
   async function pollSignalCatchup(call, controller = null) {
-    const diagnosticSession = candidateDiagnosticsRef.current
     let cursor = signalCursorRef.current
 
     while (true) {
@@ -1249,7 +1124,6 @@ export default function CommsPanel({
 
       const signals = Array.isArray(payload.signals) ? payload.signals : []
 
-      observeRemoteCandidates(diagnosticSession, signals)
       for (const signal of signals) {
         await processRemoteSignal(call, signal)
         cursor = signal.sequence
@@ -1273,17 +1147,6 @@ export default function CommsPanel({
   }
 
   async function bootstrapAcceptedMedia(call, controller) {
-    try {
-      candidateDiagnosticsRef.current = {
-        callId: call.id,
-        values: emptyCandidateDiagnostics(),
-        remoteSeen: new Set(),
-        persistedSeen: new Set(),
-      }
-      setCandidateDiagnostics({ ...candidateDiagnosticsRef.current.values })
-    } catch {
-      // Diagnostics must not prevent media bootstrap.
-    }
     mediaCallIdRef.current = call.id
     setMediaState('preparing')
     setMediaError('')
@@ -2739,37 +2602,6 @@ export default function CommsPanel({
                         <div key={field}>
                           <dt>{label}</dt>
                           <dd>{audioDiagnostics[field]}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                    <strong>ICE CANDIDATES</strong>
-                    <dl className="comms-ice-diagnostics">
-                      {[
-                        ['LOCAL TOTAL', 'localTotal'],
-                        ['LOCAL HOST', 'localHost'],
-                        ['LOCAL SRFLX', 'localSrflx'],
-                        ['LOCAL PRFLX', 'localPrflx'],
-                        ['LOCAL RELAY', 'localRelay'],
-                        ['LOCAL UNKNOWN', 'localUnknown'],
-                        ['LOCAL PROTO', 'localProtocol'],
-                        ['LOCAL EOC', 'localEoc'],
-                        ['PERSISTED', 'persisted'],
-                        ['PERSIST FAIL', 'persistFail'],
-                        ['REMOTE TOTAL', 'remoteTotal'],
-                        ['REMOTE HOST', 'remoteHost'],
-                        ['REMOTE SRFLX', 'remoteSrflx'],
-                        ['REMOTE PRFLX', 'remotePrflx'],
-                        ['REMOTE RELAY', 'remoteRelay'],
-                        ['REMOTE UNKNOWN', 'remoteUnknown'],
-                        ['REMOTE PROTO', 'remoteProtocol'],
-                        ['ADD ATTEMPTS', 'addAttempts'],
-                        ['ADD SUCCESS', 'addSuccess'],
-                        ['ADD FAIL', 'addFail'],
-                        ['LAST ADD ERROR', 'lastAddError'],
-                      ].map(([label, field]) => (
-                        <div key={field}>
-                          <dt>{label}</dt>
-                          <dd>{candidateDiagnostics[field]}</dd>
                         </div>
                       ))}
                     </dl>
