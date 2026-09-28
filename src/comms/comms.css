@@ -1092,3 +1092,19 @@
     resize: none;
   }
 }
+
+/* Keep ICE values readable and browser-generated pair IDs contained. */
+.comms-audio-diagnostics dl.comms-ice-diagnostics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 6px;
+}
+
+.comms-ice-diagnostics dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.comms-audio-diagnostics .comms-ice-diagnostics dt,
+.comms-audio-diagnostics .comms-ice-diagnostics dd {
+  font-size: 9px;
+}

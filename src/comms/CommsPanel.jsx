@@ -186,6 +186,8 @@ function sleep(milliseconds) {
 
 function emptyAudioDiagnostics() {
   return {
+    ...readIcePathDiagnostics(),
+    ...readIceStatsDiagnostics(),
     samplerStatus: 'starting',
     statsStatus: 'waiting',
     micChecked: false,
@@ -207,6 +209,99 @@ function emptyAudioDiagnostics() {
     playbackVolume: 1,
     playbackReadyState: 0,
   }
+}
+
+function diagnosticRead(read) {
+  try {
+    const value = read()
+    return (typeof value === 'string' && value) ||
+      (typeof value === 'number' && Number.isFinite(value)) ? value : 'UNKNOWN'
+  } catch {
+    return 'UNKNOWN'
+  }
+}
+
+function readIcePathDiagnostics(peer) {
+  let audio
+  try {
+    audio = peer?.getTransceivers?.().find((item) =>
+      item.sender?.track?.kind === 'audio' || item.receiver?.track?.kind === 'audio',
+    )
+  } catch {
+    // Optional inspection must not interrupt the sampler.
+  }
+  return {
+    signalingState: diagnosticRead(() => peer.signalingState),
+    iceGatheringState: diagnosticRead(() => peer.iceGatheringState),
+    iceConnectionState: diagnosticRead(() => peer.iceConnectionState),
+    connectionState: diagnosticRead(() => peer.connectionState),
+    audioDirection: diagnosticRead(() => audio.direction),
+    audioCurrentDirection: diagnosticRead(() => audio.currentDirection),
+  }
+}
+
+function readIceStatsDiagnostics(stats) {
+  const result = {
+    icePair: 'UNKNOWN',
+    icePairSource: 'UNKNOWN',
+    icePairState: 'UNKNOWN',
+    localCandidateType: 'UNKNOWN',
+    remoteCandidateType: 'UNKNOWN',
+    localCandidateProtocol: 'UNKNOWN',
+    remoteCandidateProtocol: 'UNKNOWN',
+    outboundAudioBytes: 'UNKNOWN',
+    inboundAudioBytes: 'UNKNOWN',
+  }
+  try {
+    const reports = []
+    stats.forEach((report) => reports.push(report))
+    const byId = new Map(reports.map((report) => [report.id, report]))
+    const pairs = reports.filter((report) => report.type === 'candidate-pair')
+    const audioReports = reports.filter((report) =>
+      (report.kind || report.mediaType) === 'audio' && !report.isRemote,
+    )
+    for (const [type, counter, field] of [
+      ['outbound-rtp', 'bytesSent', 'outboundAudioBytes'],
+      ['inbound-rtp', 'bytesReceived', 'inboundAudioBytes'],
+    ]) {
+      result[field] = diagnosticRead(() => {
+        const rtp = audioReports.filter((report) => report.type === type)
+        return rtp.length && rtp.every((report) => Number.isFinite(report[counter]))
+          ? rtp.reduce((sum, report) => sum + report[counter], 0)
+          : undefined
+      })
+    }
+    // Prefer the audio transport; avoid guessing when multiple paths exist.
+    const audioTransportIds = new Set(audioReports.map((report) => report.transportId).filter(Boolean))
+    const transports = reports.filter((report) => report.type === 'transport' &&
+      (!audioTransportIds.size || audioTransportIds.has(report.id)))
+    let selected = [...new Set(transports.map((report) => byId.get(report.selectedCandidatePairId)))]
+      .filter((report) => report?.type === 'candidate-pair')
+    let source = 'TRANSPORT'
+    if (!selected.length) {
+      selected = pairs.filter((report) => report.selected === true)
+      source = 'SELECTED'
+    }
+    if (!selected.length) {
+      selected = pairs.filter((report) => report.nominated === true && report.state === 'succeeded')
+      source = 'NOMINATED'
+    }
+    if (selected.length === 1) {
+      const pair = selected[0]
+      const local = byId.get(pair.localCandidateId)
+      const remote = byId.get(pair.remoteCandidateId)
+      result.icePair = diagnosticRead(() => pair.id)
+      result.icePairSource = source
+      result.icePairState = diagnosticRead(() => pair.state)
+      result.localCandidateType = diagnosticRead(() => local.candidateType)
+      result.remoteCandidateType = diagnosticRead(() => remote.candidateType)
+      result.localCandidateProtocol = diagnosticRead(() => local.protocol)
+      result.remoteCandidateProtocol = diagnosticRead(() => remote.protocol)
+    }
+  } catch {
+    // Missing or unusual stats must never stop audio flow sampling.
+  }
+  return result
 }
 
 function diagnosticSamplerLabel(value) {
@@ -1745,6 +1840,7 @@ export default function CommsPanel({
         setAudioDiagnostics((current) => ({
           ...current,
           samplerStatus: 'running',
+          ...readIcePathDiagnostics(peer),
           micChecked,
           micExists: micChecked ? Boolean(localTrack) : current.micExists,
           micEnabled: micChecked ? Boolean(localTrack?.enabled) : current.micEnabled,
@@ -1850,6 +1946,7 @@ export default function CommsPanel({
             ...current,
             samplerStatus: 'running',
             statsStatus: 'ok',
+            ...readIceStatsDiagnostics(stats),
             txFlow,
             rxFlow,
           }))
@@ -1860,6 +1957,7 @@ export default function CommsPanel({
             ...current,
             samplerStatus: 'running',
             statsStatus: 'unavailable',
+            ...readIceStatsDiagnostics(),
             txFlow: micIntentionallyMuted ? 'muted' : 'stats-unavailable',
             rxFlow: 'stats-unavailable',
           }))
@@ -2483,6 +2581,30 @@ export default function CommsPanel({
                       {' · '}
                       READY {audioDiagnostics.playbackReadyState}
                     </small>
+                    <dl className="comms-ice-diagnostics">
+                      {[
+                        ['SIGNALING', 'signalingState'],
+                        ['ICE GATHER', 'iceGatheringState'],
+                        ['ICE CONNECT', 'iceConnectionState'],
+                        ['CONNECTION', 'connectionState'],
+                        ['AUDIO DIR', 'audioDirection'],
+                        ['CURRENT DIR', 'audioCurrentDirection'],
+                        ['ICE PAIR', 'icePair'],
+                        ['PAIR SOURCE', 'icePairSource'],
+                        ['PAIR STATE', 'icePairState'],
+                        ['LOCAL TYPE', 'localCandidateType'],
+                        ['REMOTE TYPE', 'remoteCandidateType'],
+                        ['LOCAL PROTO', 'localCandidateProtocol'],
+                        ['REMOTE PROTO', 'remoteCandidateProtocol'],
+                        ['TX BYTES', 'outboundAudioBytes'],
+                        ['RX BYTES', 'inboundAudioBytes'],
+                      ].map(([label, field]) => (
+                        <div key={field}>
+                          <dt>{label}</dt>
+                          <dd>{audioDiagnostics[field]}</dd>
+                        </div>
+                      ))}
+                    </dl>
                   </div>
                 </>
               )}
