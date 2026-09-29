@@ -775,10 +775,28 @@ export default function CommsPanel({
     setSignalPollingReady(false)
     setMediaState('failed')
     setMediaError(
-      requestError?.code === 'SIGNAL_STATE_CONFLICT'
-        ? 'MEDIA SIGNALING STATE CHANGED'
-        : 'MEDIA SIGNALING FAILED',
+      requestError?.code === 'ICE_SERVER_CONFIG_FAILED'
+        ? 'TURN / STUN CREDENTIALS UNAVAILABLE'
+        : requestError?.code === 'SIGNAL_STATE_CONFLICT'
+          ? 'MEDIA SIGNALING STATE CHANGED'
+          : 'MEDIA SIGNALING FAILED',
     )
+  }
+
+  async function loadIceServers() {
+    try {
+      const payload = await requestJson('/api/comms/ice-servers')
+      if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0) {
+        throw new Error('ICE server configuration was empty.')
+      }
+      return payload.iceServers
+    } catch (requestError) {
+      if (requestError?.name === 'AbortError') throw requestError
+
+      const configurationError = new Error('ICE server configuration failed.')
+      configurationError.code = 'ICE_SERVER_CONFIG_FAILED'
+      throw configurationError
+    }
   }
 
   function enqueueIceSignal(call, candidate) {
@@ -864,7 +882,7 @@ export default function CommsPanel({
     if (peer.connectionState === 'failed' || peer.iceConnectionState === 'failed') {
       setSignalPollingReady(false)
       setMediaState('failed')
-      setMediaError('DIRECT MEDIA PATH FAILED')
+      setMediaError('WEBRTC MEDIA PATH FAILED')
       return
     }
 
@@ -884,7 +902,7 @@ export default function CommsPanel({
     }
   }
 
-  function createPeerConnectionForCall(call, localStream) {
+  async function createPeerConnectionForCall(call, localStream) {
     if (
       peerConnectionRef.current &&
       mediaCallIdRef.current === call.id
@@ -892,13 +910,18 @@ export default function CommsPanel({
       return peerConnectionRef.current
     }
 
-    const peer = new RTCPeerConnection({
-      iceServers: [
-        {
-          urls: 'stun:stun.cloudflare.com:3478',
-        },
-      ],
-    })
+    const iceServers = await loadIceServers()
+
+    if (
+      currentCallRef.current?.id !== call.id ||
+      currentCallRef.current?.status !== 'accepted'
+    ) {
+      const staleError = new Error('Call state changed before ICE configuration completed.')
+      staleError.name = 'AbortError'
+      throw staleError
+    }
+
+    const peer = new RTCPeerConnection({ iceServers })
     const remoteStream = new MediaStream()
 
     mediaCallIdRef.current = call.id
@@ -960,7 +983,7 @@ export default function CommsPanel({
       if (!stream) return false
 
       try {
-        const peer = createPeerConnectionForCall(call, stream)
+        const peer = await createPeerConnectionForCall(call, stream)
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
 
@@ -994,7 +1017,7 @@ export default function CommsPanel({
       if (!stream) return false
 
       try {
-        const peer = createPeerConnectionForCall(call, stream)
+        const peer = await createPeerConnectionForCall(call, stream)
         await peer.setRemoteDescription(offerPayload)
         await flushRemoteCandidates()
 
@@ -2524,7 +2547,7 @@ export default function CommsPanel({
                       ? 'PEER MEDIA CONNECTED'
                       : mediaState === 'redial'
                         ? 'END THIS CALL AND START A FRESH MEDIA SESSION'
-                        : 'DIRECT WEBRTC // STUN ONLY'
+                        : 'WEBRTC // TWILIO STUN + TURN'
                   )}
                 </small>
               </div>
