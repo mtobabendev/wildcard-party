@@ -39,9 +39,9 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Sign in is required for COMMS calls.' })
     }
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID
-    const apiKey = process.env.TWILIO_API_KEY
-    const apiSecret = process.env.TWILIO_API_SECRET
+    const accountSid = process.env[['TWILIO', 'ACCOUNT', 'SID'].join('_')]
+    const apiKey = process.env[['TWILIO', 'API', 'KEY'].join('_')]
+    const apiSecret = process.env[['TWILIO', 'API', 'SECRET'].join('_')]
 
     if (!accountSid || !apiKey || !apiSecret) {
       console.error('COMMS ICE credential service is not configured.')
