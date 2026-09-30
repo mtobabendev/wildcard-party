@@ -212,7 +212,11 @@ export default function CommsPanel({
   const [mediaState, setMediaState] = useState('idle')
   const [mediaError, setMediaError] = useState('')
   const [mediaMuted, setMediaMuted] = useState(false)
-  const [cameraEnabled, setCameraEnabled] = useState(true)
+  const [cameraEnabled, setCameraEnabled] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
+  const [videoBusy, setVideoBusy] = useState(false)
+  const [videoError, setVideoError] = useState('')
+  const [hasRemoteVideo, setHasRemoteVideo] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [mediaRevision, setMediaRevision] = useState(0)
   const [signalPollingReady, setSignalPollingReady] = useState(false)
@@ -238,6 +242,8 @@ export default function CommsPanel({
   const peerConnectionRef = useRef(null)
   const localStreamRef = useRef(null)
   const remoteStreamRef = useRef(null)
+  const remoteVideoStreamRef = useRef(null)
+  const videoSenderRef = useRef(null)
   const mediaCallIdRef = useRef(null)
   const mediaBootstrapControllerRef = useRef(null)
   const signalPollControllerRef = useRef(null)
@@ -428,6 +434,12 @@ export default function CommsPanel({
       peer.onconnectionstatechange = null
       peer.oniceconnectionstatechange = null
 
+      for (const track of remoteVideoStreamRef.current?.getVideoTracks?.() || []) {
+        track.onmute = null
+        track.onunmute = null
+        track.onended = null
+      }
+
       try {
         peer.close()
       } catch {
@@ -446,6 +458,8 @@ export default function CommsPanel({
     peerConnectionRef.current = null
     localStreamRef.current = null
     remoteStreamRef.current = null
+    remoteVideoStreamRef.current = null
+    videoSenderRef.current = null
     mediaCallIdRef.current = null
     mediaSetupPromiseRef.current = null
     signalCursorRef.current = '0'
@@ -461,7 +475,11 @@ export default function CommsPanel({
       setMediaState('idle')
       setMediaError('')
       setMediaMuted(false)
-      setCameraEnabled(true)
+      setCameraEnabled(false)
+      setVideoReady(false)
+      setVideoBusy(false)
+      setVideoError('')
+      setHasRemoteVideo(false)
       setAutoplayBlocked(false)
       setHasRemoteAudio(false)
       setMediaRevision((value) => value + 1)
@@ -540,7 +558,7 @@ export default function CommsPanel({
       mediaCallIdRef.current = call.id
       localStreamRef.current = stream
       setMediaMuted(false)
-      setCameraEnabled(true)
+      setCameraEnabled(stream.getVideoTracks().length > 0)
       setMediaRevision((value) => value + 1)
       return stream
     } catch (requestError) {
@@ -664,12 +682,10 @@ export default function CommsPanel({
     const call = currentCallRef.current
     if (call?.status !== 'accepted') return
 
-    const remoteElement = call.kind === 'video'
-      ? remoteVideoRef.current
-      : remoteAudioRef.current
+    const remoteElement = remoteAudioRef.current
     const remoteStream = remoteStreamRef.current
 
-    if (!remoteElement || !remoteStream || remoteStream.getTracks().length === 0) return
+    if (!remoteElement || !remoteStream?.getAudioTracks?.().length) return
 
     if (remoteElement.srcObject !== remoteStream) {
       remoteElement.srcObject = remoteStream
@@ -744,10 +760,12 @@ export default function CommsPanel({
 
     const peer = new RTCPeerConnection({ iceServers })
     const remoteStream = new MediaStream()
+    const remoteVideoStream = new MediaStream()
 
     mediaCallIdRef.current = call.id
     peerConnectionRef.current = peer
     remoteStreamRef.current = remoteStream
+    remoteVideoStreamRef.current = remoteVideoStream
 
     peer.onicecandidate = (event) => {
       if (!event.candidate) return
@@ -762,20 +780,44 @@ export default function CommsPanel({
     }
 
     peer.ontrack = (event) => {
+      const track = event.track
+      if (!track) return
+
+      if (track.kind === 'video') {
+        const targetStream = remoteVideoStreamRef.current
+        if (!targetStream) return
+        if (!targetStream.getVideoTracks().some((current) => current.id === track.id)) {
+          targetStream.addTrack(track)
+        }
+
+        const syncRemoteVideoState = () => {
+          const stream = remoteVideoStreamRef.current
+          const active = Boolean(
+            stream?.getVideoTracks?.().some(
+              (current) => current.readyState === 'live' && !current.muted,
+            ),
+          )
+          setHasRemoteVideo(active)
+          setMediaRevision((value) => value + 1)
+        }
+
+        track.onmute = syncRemoteVideoState
+        track.onunmute = syncRemoteVideoState
+        track.onended = () => {
+          remoteVideoStreamRef.current?.removeTrack?.(track)
+          syncRemoteVideoState()
+        }
+        syncRemoteVideoState()
+        return
+      }
+
       const targetStream = remoteStreamRef.current
       if (!targetStream) return
-
-      const tracks = event.streams?.[0]?.getTracks?.() || [event.track]
-      for (const track of tracks) {
-        if (!track || targetStream.getTracks().some((current) => current.id === track.id)) {
-          continue
-        }
+      if (!targetStream.getAudioTracks().some((current) => current.id === track.id)) {
         targetStream.addTrack(track)
       }
 
-      if (targetStream.getAudioTracks().length > 0) {
-        setHasRemoteAudio(true)
-      }
+      setHasRemoteAudio(targetStream.getAudioTracks().length > 0)
       setMediaRevision((value) => value + 1)
       window.setTimeout(() => {
         attemptRemotePlayback()
@@ -791,7 +833,19 @@ export default function CommsPanel({
     }
 
     for (const track of localStream.getTracks()) {
-      peer.addTrack(track, localStream)
+      const sender = peer.addTrack(track, localStream)
+      if (track.kind === 'video') {
+        videoSenderRef.current = sender
+        setVideoReady(true)
+      }
+    }
+
+    if (call.kind === 'audio' && call.callerAccountId === account?.id) {
+      const videoTransceiver = peer.addTransceiver('video', {
+        direction: 'sendrecv',
+      })
+      videoSenderRef.current = videoTransceiver.sender
+      setVideoReady(true)
     }
 
     setMediaState('connecting')
@@ -843,6 +897,18 @@ export default function CommsPanel({
       try {
         const peer = await createPeerConnectionForCall(call, stream)
         await peer.setRemoteDescription(offerPayload)
+
+        if (call.kind === 'audio') {
+          const videoTransceiver = peer.getTransceivers().find(
+            (transceiver) => transceiver.receiver?.track?.kind === 'video',
+          )
+          if (videoTransceiver) {
+            videoTransceiver.direction = 'sendrecv'
+            videoSenderRef.current = videoTransceiver.sender
+            setVideoReady(true)
+          }
+        }
+
         await flushRemoteCandidates()
 
         const answer = await peer.createAnswer()
@@ -1071,15 +1137,111 @@ export default function CommsPanel({
     setMediaMuted(!nextEnabled)
   }
 
-  function toggleCamera() {
-    const tracks = localStreamRef.current?.getVideoTracks?.() || []
-    if (!tracks.length) return
+  async function startVideo() {
+    const call = currentCallRef.current
+    const peer = peerConnectionRef.current
+    const sender = videoSenderRef.current
 
-    const nextEnabled = !cameraEnabled
-    for (const track of tracks) {
-      track.enabled = nextEnabled
+    if (
+      call?.status !== 'accepted' ||
+      !peer ||
+      !sender ||
+      videoBusy ||
+      cameraEnabled
+    ) {
+      return
     }
-    setCameraEnabled(nextEnabled)
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVideoError('VIDEO UNAVAILABLE')
+      return
+    }
+
+    setVideoBusy(true)
+    setVideoError('')
+
+    let cameraStream = null
+
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: true,
+      })
+
+      const track = cameraStream.getVideoTracks()[0]
+      if (!track) throw new Error('Camera did not provide a video track.')
+
+      if (
+        currentCallRef.current?.id !== call.id ||
+        currentCallRef.current?.status !== 'accepted' ||
+        peerConnectionRef.current !== peer
+      ) {
+        for (const staleTrack of cameraStream.getTracks()) staleTrack.stop()
+        return
+      }
+
+      await sender.replaceTrack(track)
+
+      const localStream = localStreamRef.current
+      for (const oldTrack of localStream?.getVideoTracks?.() || []) {
+        oldTrack.onended = null
+        localStream.removeTrack(oldTrack)
+        oldTrack.stop()
+      }
+      localStream?.addTrack(track)
+
+      track.onended = () => {
+        if (localStreamRef.current?.getVideoTracks?.().some((current) => current.id === track.id)) {
+          localStreamRef.current.removeTrack(track)
+        }
+        if (videoSenderRef.current?.track === track) {
+          videoSenderRef.current.replaceTrack(null).catch(() => {})
+        }
+        setCameraEnabled(false)
+        setVideoError('VIDEO UNAVAILABLE')
+        if (localVideoRef.current) localVideoRef.current.srcObject = null
+        setMediaRevision((value) => value + 1)
+      }
+
+      setCameraEnabled(true)
+      setMediaRevision((value) => value + 1)
+    } catch {
+      for (const track of cameraStream?.getTracks?.() || []) track.stop()
+      setVideoError('VIDEO UNAVAILABLE')
+    } finally {
+      setVideoBusy(false)
+    }
+  }
+
+  async function stopVideo() {
+    if (videoBusy) return
+
+    const sender = videoSenderRef.current
+    const localStream = localStreamRef.current
+    const tracks = localStream?.getVideoTracks?.() || []
+
+    if (!sender && !tracks.length) return
+
+    setVideoBusy(true)
+    setVideoError('')
+
+    try {
+      if (sender) await sender.replaceTrack(null)
+
+      for (const track of tracks) {
+        track.onended = null
+        localStream.removeTrack(track)
+        track.stop()
+      }
+
+      if (localVideoRef.current) localVideoRef.current.srcObject = null
+      setCameraEnabled(false)
+      setMediaRevision((value) => value + 1)
+    } catch {
+      setVideoError('VIDEO UNAVAILABLE')
+    } finally {
+      setVideoBusy(false)
+    }
   }
 
   async function resumeRemotePlayback() {
@@ -1533,22 +1695,36 @@ export default function CommsPanel({
       playResult?.catch?.(() => {})
     }
 
-    const call = currentCallRef.current
+    const remoteAudio = remoteAudioRef.current
     const remoteStream = remoteStreamRef.current
-    const remoteElement = call?.kind === 'video'
-      ? remoteVideoRef.current
-      : remoteAudioRef.current
-
-    if (remoteElement && remoteStream && remoteElement.srcObject !== remoteStream) {
-      remoteElement.srcObject = remoteStream
+    if (remoteAudio && remoteStream && remoteAudio.srcObject !== remoteStream) {
+      remoteAudio.srcObject = remoteStream
     }
 
-    if (remoteStream?.getTracks?.().length) {
+    const remoteVideo = remoteVideoRef.current
+    const remoteVideoStream = remoteVideoStreamRef.current
+    if (
+      remoteVideo &&
+      remoteVideoStream &&
+      remoteVideo.srcObject !== remoteVideoStream
+    ) {
+      remoteVideo.srcObject = remoteVideoStream
+      const playResult = remoteVideo.play()
+      playResult?.catch?.(() => {})
+    }
+
+    if (remoteStream?.getAudioTracks?.().length) {
       window.setTimeout(() => {
         attemptRemotePlayback()
       }, 0)
     }
-  }, [currentCall?.id, currentCall?.kind, mediaRevision])
+  }, [
+    currentCall?.id,
+    currentCall?.kind,
+    mediaRevision,
+    cameraEnabled,
+    hasRemoteVideo,
+  ])
 
   useEffect(() => {
     const call = currentCall
@@ -2088,35 +2264,36 @@ export default function CommsPanel({
                 </small>
               </div>
 
-              {currentCall.kind === 'audio' && (
-                <>
-                  <audio
-                    ref={remoteAudioRef}
-                    className="comms-live-audio"
-                    autoPlay
-                    controls
-                    aria-label="Remote call audio"
-                  />
-                </>
-              )}
+              <audio
+                ref={remoteAudioRef}
+                className="comms-live-audio"
+                autoPlay
+                controls={currentCall.kind === 'audio'}
+                hidden={currentCall.kind === 'video'}
+                aria-label="Remote call audio"
+              />
 
-              {currentCall.kind === 'video' && (
+              {(cameraEnabled || hasRemoteVideo) && (
                 <div className="comms-live-video-stage">
-                  <video
-                    ref={remoteVideoRef}
-                    className="comms-live-video-remote"
-                    autoPlay
-                    playsInline
-                    aria-label="Remote call video"
-                  />
-                  <video
-                    ref={localVideoRef}
-                    className="comms-live-video-local"
-                    autoPlay
-                    playsInline
-                    muted
-                    aria-label="Local muted video preview"
-                  />
+                  {hasRemoteVideo && (
+                    <video
+                      ref={remoteVideoRef}
+                      className="comms-live-video-remote"
+                      autoPlay
+                      playsInline
+                      aria-label="Remote call video"
+                    />
+                  )}
+                  {cameraEnabled && (
+                    <video
+                      ref={localVideoRef}
+                      className="comms-live-video-local"
+                      autoPlay
+                      playsInline
+                      muted
+                      aria-label="Local muted video preview"
+                    />
+                  )}
                 </div>
               )}
 
@@ -2127,10 +2304,22 @@ export default function CommsPanel({
                   </button>
                 )}
 
-                {currentCall.kind === 'video' && hasLocalVideo && mediaState !== 'redial' && (
-                  <button type="button" onClick={toggleCamera}>
-                    {cameraEnabled ? 'CAMERA OFF' : 'CAMERA ON'}
+                {videoReady && mediaState !== 'redial' && (
+                  <button
+                    type="button"
+                    onClick={cameraEnabled ? stopVideo : startVideo}
+                    disabled={videoBusy}
+                  >
+                    {videoBusy
+                      ? 'VIDEO…'
+                      : cameraEnabled
+                        ? 'STOP VIDEO'
+                        : 'START VIDEO'}
                   </button>
+                )}
+
+                {videoError && (
+                  <span className="comms-kicker">{videoError}</span>
                 )}
 
                 {currentCall.kind === 'audio' && hasRemoteAudio && (
