@@ -2422,6 +2422,7 @@ export default function CommsPanel({
                 {videoReady && cameraEnabled && mediaState !== 'redial' && (
                   <button
                     type="button"
+                    className="comms-camera-switch"
                     onClick={switchCamera}
                     disabled={videoBusy}
                   >
