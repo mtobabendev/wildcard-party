@@ -184,176 +184,6 @@ function sleep(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
-function emptyAudioDiagnostics() {
-  return {
-    ...readIcePathDiagnostics(),
-    ...readIceStatsDiagnostics(),
-    samplerStatus: 'starting',
-    statsStatus: 'waiting',
-    micChecked: false,
-    micExists: false,
-    micEnabled: false,
-    micMuted: false,
-    micReadyState: 'waiting',
-    senderChecked: false,
-    senderAttached: false,
-    txFlow: 'waiting',
-    remoteTrackChecked: false,
-    remoteTrackExists: false,
-    remoteTrackEnabled: false,
-    remoteTrackMuted: false,
-    remoteTrackReadyState: 'waiting',
-    rxFlow: 'waiting',
-    playbackChecked: false,
-    playback: 'waiting',
-    playbackVolume: 1,
-    playbackReadyState: 0,
-  }
-}
-
-function diagnosticRead(read) {
-  try {
-    const value = read()
-    return (typeof value === 'string' && value) ||
-      (typeof value === 'number' && Number.isFinite(value)) ? value : 'UNKNOWN'
-  } catch {
-    return 'UNKNOWN'
-  }
-}
-
-function readIcePathDiagnostics(peer) {
-  let audio
-  try {
-    audio = peer?.getTransceivers?.().find((item) =>
-      item.sender?.track?.kind === 'audio' || item.receiver?.track?.kind === 'audio',
-    )
-  } catch {
-    // Optional inspection must not interrupt the sampler.
-  }
-  return {
-    signalingState: diagnosticRead(() => peer.signalingState),
-    iceGatheringState: diagnosticRead(() => peer.iceGatheringState),
-    iceConnectionState: diagnosticRead(() => peer.iceConnectionState),
-    connectionState: diagnosticRead(() => peer.connectionState),
-    audioDirection: diagnosticRead(() => audio.direction),
-    audioCurrentDirection: diagnosticRead(() => audio.currentDirection),
-  }
-}
-
-function readIceStatsDiagnostics(stats) {
-  const result = {
-    icePair: 'UNKNOWN',
-    icePairSource: 'UNKNOWN',
-    icePairState: 'UNKNOWN',
-    localCandidateType: 'UNKNOWN',
-    remoteCandidateType: 'UNKNOWN',
-    localCandidateProtocol: 'UNKNOWN',
-    remoteCandidateProtocol: 'UNKNOWN',
-    outboundAudioBytes: 'UNKNOWN',
-    inboundAudioBytes: 'UNKNOWN',
-  }
-  try {
-    const reports = []
-    stats.forEach((report) => reports.push(report))
-    const byId = new Map(reports.map((report) => [report.id, report]))
-    const pairs = reports.filter((report) => report.type === 'candidate-pair')
-    const audioReports = reports.filter((report) =>
-      (report.kind || report.mediaType) === 'audio' && !report.isRemote,
-    )
-    for (const [type, counter, field] of [
-      ['outbound-rtp', 'bytesSent', 'outboundAudioBytes'],
-      ['inbound-rtp', 'bytesReceived', 'inboundAudioBytes'],
-    ]) {
-      result[field] = diagnosticRead(() => {
-        const rtp = audioReports.filter((report) => report.type === type)
-        return rtp.length && rtp.every((report) => Number.isFinite(report[counter]))
-          ? rtp.reduce((sum, report) => sum + report[counter], 0)
-          : undefined
-      })
-    }
-    // Prefer the audio transport; avoid guessing when multiple paths exist.
-    const audioTransportIds = new Set(audioReports.map((report) => report.transportId).filter(Boolean))
-    const transports = reports.filter((report) => report.type === 'transport' &&
-      (!audioTransportIds.size || audioTransportIds.has(report.id)))
-    let selected = [...new Set(transports.map((report) => byId.get(report.selectedCandidatePairId)))]
-      .filter((report) => report?.type === 'candidate-pair')
-    let source = 'TRANSPORT'
-    if (!selected.length) {
-      selected = pairs.filter((report) => report.selected === true)
-      source = 'SELECTED'
-    }
-    if (!selected.length) {
-      selected = pairs.filter((report) => report.nominated === true && report.state === 'succeeded')
-      source = 'NOMINATED'
-    }
-    if (selected.length === 1) {
-      const pair = selected[0]
-      const local = byId.get(pair.localCandidateId)
-      const remote = byId.get(pair.remoteCandidateId)
-      result.icePair = diagnosticRead(() => pair.id)
-      result.icePairSource = source
-      result.icePairState = diagnosticRead(() => pair.state)
-      result.localCandidateType = diagnosticRead(() => local.candidateType)
-      result.remoteCandidateType = diagnosticRead(() => remote.candidateType)
-      result.localCandidateProtocol = diagnosticRead(() => local.protocol)
-      result.remoteCandidateProtocol = diagnosticRead(() => remote.protocol)
-    }
-  } catch {
-    // Missing or unusual stats must never stop audio flow sampling.
-  }
-  return result
-}
-
-function diagnosticSamplerLabel(value) {
-  if (value === 'running') return 'RUNNING'
-  if (value === 'peer-waiting') return 'PEER WAITING'
-  if (value === 'error') return 'ERROR'
-  return 'STARTING'
-}
-
-function diagnosticStatsLabel(value) {
-  if (value === 'ok') return 'OK'
-  if (value === 'unavailable') return 'UNAVAILABLE'
-  return 'WAITING'
-}
-
-function microphoneDiagnosticLabel(diagnostic) {
-  if (!diagnostic.micChecked) return 'WAITING'
-  if (!diagnostic.micExists) return 'MISSING'
-  if (diagnostic.micReadyState === 'ended') return 'ENDED'
-  if (!diagnostic.micEnabled || diagnostic.micMuted) return 'MUTED'
-  return 'LIVE'
-}
-
-function senderDiagnosticLabel(diagnostic) {
-  if (!diagnostic.senderChecked) return 'WAITING'
-  return diagnostic.senderAttached ? 'ATTACHED' : 'MISSING'
-}
-
-function remoteTrackDiagnosticLabel(diagnostic) {
-  if (!diagnostic.remoteTrackChecked) return 'WAITING'
-  if (!diagnostic.remoteTrackExists) return 'MISSING'
-  if (diagnostic.remoteTrackReadyState === 'ended') return 'ENDED'
-  if (!diagnostic.remoteTrackEnabled || diagnostic.remoteTrackMuted) return 'MUTED'
-  return 'LIVE'
-}
-
-function audioFlowDiagnosticLabel(value) {
-  if (value === 'flowing') return 'FLOWING'
-  if (value === 'no-flow') return 'NO FLOW'
-  if (value === 'muted') return 'MUTED'
-  if (value === 'stats-unavailable') return 'STATS UNAVAILABLE'
-  return 'WAITING'
-}
-
-function playbackDiagnosticLabel(diagnostic) {
-  if (!diagnostic.playbackChecked || diagnostic.playback === 'waiting') return 'WAITING'
-  if (diagnostic.playback === 'playing') return 'PLAYING'
-  if (diagnostic.playback === 'paused') return 'PAUSED'
-  if (diagnostic.playback === 'muted') return 'MUTED'
-  return 'NO MEDIA'
-}
-
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -387,7 +217,7 @@ export default function CommsPanel({
   const [mediaRevision, setMediaRevision] = useState(0)
   const [signalPollingReady, setSignalPollingReady] = useState(false)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
-  const [audioDiagnostics, setAudioDiagnostics] = useState(() => emptyAudioDiagnostics())
+  const [hasRemoteAudio, setHasRemoteAudio] = useState(false)
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -422,8 +252,6 @@ export default function CommsPanel({
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
-  const audioDiagnosticTimerRef = useRef(null)
-  const audioStatsSnapshotRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -588,12 +416,6 @@ export default function CommsPanel({
   }
 
   function cleanupMediaSession({ resetState = true } = {}) {
-    if (audioDiagnosticTimerRef.current) {
-      window.clearInterval(audioDiagnosticTimerRef.current)
-      audioDiagnosticTimerRef.current = null
-    }
-    audioStatsSnapshotRef.current = null
-
     mediaBootstrapControllerRef.current?.abort()
     signalPollControllerRef.current?.abort()
     mediaBootstrapControllerRef.current = null
@@ -641,7 +463,7 @@ export default function CommsPanel({
       setMediaMuted(false)
       setCameraEnabled(true)
       setAutoplayBlocked(false)
-      setAudioDiagnostics(emptyAudioDiagnostics())
+      setHasRemoteAudio(false)
       setMediaRevision((value) => value + 1)
     }
   }
@@ -880,7 +702,6 @@ export default function CommsPanel({
     }
 
     if (peer.connectionState === 'failed' || peer.iceConnectionState === 'failed') {
-      setSignalPollingReady(false)
       setMediaState('failed')
       setMediaError('WEBRTC MEDIA PATH FAILED')
       return
@@ -952,6 +773,9 @@ export default function CommsPanel({
         targetStream.addTrack(track)
       }
 
+      if (targetStream.getAudioTracks().length > 0) {
+        setHasRemoteAudio(true)
+      }
       setMediaRevision((value) => value + 1)
       window.setTimeout(() => {
         attemptRemotePlayback()
@@ -1738,308 +1562,6 @@ export default function CommsPanel({
 
   useEffect(() => {
     const call = currentCall
-
-    if (
-      !account?.id ||
-      call?.status !== 'accepted' ||
-      call.kind !== 'audio'
-    ) {
-      if (audioDiagnosticTimerRef.current) {
-        window.clearInterval(audioDiagnosticTimerRef.current)
-        audioDiagnosticTimerRef.current = null
-      }
-      audioStatsSnapshotRef.current = null
-      setAudioDiagnostics(emptyAudioDiagnostics())
-      return undefined
-    }
-
-    const peer = peerConnectionRef.current
-    if (!peer) {
-      if (audioDiagnosticTimerRef.current) {
-        window.clearInterval(audioDiagnosticTimerRef.current)
-        audioDiagnosticTimerRef.current = null
-      }
-      audioStatsSnapshotRef.current = null
-      setAudioDiagnostics({
-        ...emptyAudioDiagnostics(),
-        samplerStatus: 'peer-waiting',
-      })
-      return undefined
-    }
-
-    let cancelled = false
-    let inFlight = false
-    const startedAt = Date.now()
-
-    audioStatsSnapshotRef.current = {
-      bytesSent: 0,
-      packetsSent: 0,
-      bytesReceived: 0,
-      packetsReceived: 0,
-      samples: 0,
-      startedAt,
-    }
-
-    const sampleAudioPath = async () => {
-      if (
-        cancelled ||
-        inFlight ||
-        peerConnectionRef.current !== peer ||
-        currentCallRef.current?.id !== call.id ||
-        currentCallRef.current?.status !== 'accepted'
-      ) {
-        return
-      }
-
-      inFlight = true
-
-      let micChecked = false
-      let localTrack = null
-      try {
-        localTrack = localStreamRef.current?.getAudioTracks?.()[0] || null
-        micChecked = true
-      } catch {
-        // Keep this gauge WAITING if the local track cannot be inspected.
-      }
-
-      let senderChecked = false
-      let senderAttached = false
-      try {
-        senderAttached = peer.getSenders().some(
-          (sender) => sender.track?.kind === 'audio',
-        )
-        senderChecked = true
-      } catch {
-        // Keep this gauge WAITING if sender inspection is unavailable.
-      }
-
-      let remoteTrackChecked = false
-      let remoteStream = null
-      let remoteTrack = null
-      try {
-        remoteStream = remoteStreamRef.current
-        remoteTrack = remoteStream?.getAudioTracks?.()[0] || null
-        remoteTrackChecked = Boolean(remoteStream)
-      } catch {
-        // Keep this gauge WAITING if the remote stream cannot be inspected.
-      }
-
-      let playbackChecked = false
-      let playback = 'waiting'
-      let playbackVolume = 1
-      let playbackReadyState = 0
-
-      try {
-        const audio = remoteAudioRef.current
-
-        if (audio) {
-          playbackChecked = true
-
-          if (remoteStream && remoteTrack && audio.srcObject !== remoteStream) {
-            audio.srcObject = remoteStream
-          }
-
-          playback = !remoteTrack || audio.srcObject !== remoteStream
-            ? 'no-media'
-            : audio.muted
-              ? 'muted'
-              : audio.paused
-                ? 'paused'
-                : 'playing'
-          playbackVolume = Number.isFinite(audio.volume) ? audio.volume : 1
-          playbackReadyState = Number.isFinite(audio.readyState) ? audio.readyState : 0
-        }
-      } catch {
-        // Keep playback WAITING if the media element cannot be inspected.
-      }
-
-      const micIntentionallyMuted = Boolean(
-        micChecked &&
-        localTrack &&
-        (!localTrack.enabled || localTrack.muted),
-      )
-
-      if (!cancelled) {
-        setAudioDiagnostics((current) => ({
-          ...current,
-          samplerStatus: 'running',
-          ...readIcePathDiagnostics(peer),
-          micChecked,
-          micExists: micChecked ? Boolean(localTrack) : current.micExists,
-          micEnabled: micChecked ? Boolean(localTrack?.enabled) : current.micEnabled,
-          micMuted: micChecked ? Boolean(localTrack?.muted) : current.micMuted,
-          micReadyState: micChecked
-            ? localTrack?.readyState || 'missing'
-            : current.micReadyState,
-          senderChecked,
-          senderAttached: senderChecked ? senderAttached : current.senderAttached,
-          remoteTrackChecked,
-          remoteTrackExists: remoteTrackChecked
-            ? Boolean(remoteTrack)
-            : current.remoteTrackExists,
-          remoteTrackEnabled: remoteTrackChecked
-            ? Boolean(remoteTrack?.enabled)
-            : current.remoteTrackEnabled,
-          remoteTrackMuted: remoteTrackChecked
-            ? Boolean(remoteTrack?.muted)
-            : current.remoteTrackMuted,
-          remoteTrackReadyState: remoteTrackChecked
-            ? remoteTrack?.readyState || 'missing'
-            : current.remoteTrackReadyState,
-          playbackChecked,
-          playback: playbackChecked ? playback : current.playback,
-          playbackVolume: playbackChecked
-            ? playbackVolume
-            : current.playbackVolume,
-          playbackReadyState: playbackChecked
-            ? playbackReadyState
-            : current.playbackReadyState,
-          txFlow: micIntentionallyMuted ? 'muted' : current.txFlow,
-        }))
-      }
-
-      try {
-        const stats = await peer.getStats()
-        let outboundSeen = false
-        let inboundSeen = false
-        let bytesSent = 0
-        let packetsSent = 0
-        let bytesReceived = 0
-        let packetsReceived = 0
-
-        stats.forEach((report) => {
-          const kind = report.kind || report.mediaType
-          if (kind !== 'audio' || report.isRemote) return
-
-          if (report.type === 'outbound-rtp') {
-            outboundSeen = true
-            bytesSent += Number(report.bytesSent) || 0
-            packetsSent += Number(report.packetsSent) || 0
-          } else if (report.type === 'inbound-rtp') {
-            inboundSeen = true
-            bytesReceived += Number(report.bytesReceived) || 0
-            packetsReceived += Number(report.packetsReceived) || 0
-          }
-        })
-
-        const previous = audioStatsSnapshotRef.current
-        const warm = Boolean(
-          previous &&
-          previous.samples >= 1 &&
-          Date.now() - previous.startedAt >= 2500
-        )
-
-        const txFlow = micIntentionallyMuted
-          ? 'muted'
-          : !warm
-            ? 'waiting'
-            : (
-                outboundSeen &&
-                (
-                  bytesSent > previous.bytesSent ||
-                  packetsSent > previous.packetsSent
-                )
-              )
-              ? 'flowing'
-              : 'no-flow'
-
-        const rxFlow = !warm
-          ? 'waiting'
-          : (
-              inboundSeen &&
-              (
-                bytesReceived > previous.bytesReceived ||
-                packetsReceived > previous.packetsReceived
-              )
-            )
-            ? 'flowing'
-            : 'no-flow'
-
-        audioStatsSnapshotRef.current = {
-          bytesSent,
-          packetsSent,
-          bytesReceived,
-          packetsReceived,
-          samples: (previous?.samples || 0) + 1,
-          startedAt: previous?.startedAt || startedAt,
-        }
-
-        if (!cancelled) {
-          setAudioDiagnostics((current) => ({
-            ...current,
-            samplerStatus: 'running',
-            statsStatus: 'ok',
-            ...readIceStatsDiagnostics(stats),
-            txFlow,
-            rxFlow,
-          }))
-        }
-      } catch (statsError) {
-        if (!cancelled) {
-          setAudioDiagnostics((current) => ({
-            ...current,
-            samplerStatus: 'running',
-            statsStatus: 'unavailable',
-            ...readIceStatsDiagnostics(),
-            txFlow: micIntentionallyMuted ? 'muted' : 'stats-unavailable',
-            rxFlow: 'stats-unavailable',
-          }))
-        }
-
-        console.warn('COMMS audio diagnostics stats unavailable', {
-          name: statsError?.name || null,
-        })
-      } finally {
-        inFlight = false
-      }
-    }
-
-    sampleAudioPath()
-    const timer = window.setInterval(sampleAudioPath, 1000)
-    audioDiagnosticTimerRef.current = timer
-
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      if (audioDiagnosticTimerRef.current === timer) {
-        audioDiagnosticTimerRef.current = null
-      }
-      audioStatsSnapshotRef.current = null
-    }
-  }, [
-    account?.id,
-    currentCall?.id,
-    currentCall?.status,
-    currentCall?.kind,
-    mediaRevision,
-  ])
-
-  useEffect(() => {
-    const call = currentCall
-    if (!account?.id || call?.status !== 'accepted') {
-      if (mediaCallIdRef.current) {
-        cleanupMediaSession()
-      }
-      return undefined
-    }
-
-    cleanupMediaSession()
-
-    const controller = new AbortController()
-    mediaBootstrapControllerRef.current = controller
-
-    bootstrapAcceptedMedia(call, controller)
-
-    return () => {
-      if (mediaBootstrapControllerRef.current === controller) {
-        controller.abort()
-        mediaBootstrapControllerRef.current = null
-      }
-    }
-  }, [account?.id, currentCall?.id, currentCall?.status, mediaRetryNonce])
-
-  useEffect(() => {
-    const call = currentCall
     if (
       !account?.id ||
       call?.status !== 'accepted' ||
@@ -2561,74 +2083,6 @@ export default function CommsPanel({
                     controls
                     aria-label="Remote call audio"
                   />
-                  <div className="comms-audio-diagnostics" aria-label="Live audio path diagnostics">
-                    <strong>AUDIO PATH</strong>
-                    <div className="comms-audio-diagnostic-meta">
-                      <span>
-                        DIAGNOSTICS
-                        <b>{diagnosticSamplerLabel(audioDiagnostics.samplerStatus)}</b>
-                      </span>
-                      <span>
-                        STATS
-                        <b>{diagnosticStatsLabel(audioDiagnostics.statsStatus)}</b>
-                      </span>
-                    </div>
-                    <dl>
-                      <div>
-                        <dt>MIC</dt>
-                        <dd>{microphoneDiagnosticLabel(audioDiagnostics)}</dd>
-                      </div>
-                      <div>
-                        <dt>SENDER</dt>
-                        <dd>{senderDiagnosticLabel(audioDiagnostics)}</dd>
-                      </div>
-                      <div>
-                        <dt>TX</dt>
-                        <dd>{audioFlowDiagnosticLabel(audioDiagnostics.txFlow)}</dd>
-                      </div>
-                      <div>
-                        <dt>REMOTE TRACK</dt>
-                        <dd>{remoteTrackDiagnosticLabel(audioDiagnostics)}</dd>
-                      </div>
-                      <div>
-                        <dt>RX</dt>
-                        <dd>{audioFlowDiagnosticLabel(audioDiagnostics.rxFlow)}</dd>
-                      </div>
-                      <div>
-                        <dt>PLAYBACK</dt>
-                        <dd>{playbackDiagnosticLabel(audioDiagnostics)}</dd>
-                      </div>
-                    </dl>
-                    <small>
-                      VOLUME {Math.round(audioDiagnostics.playbackVolume * 100)}%
-                      {' · '}
-                      READY {audioDiagnostics.playbackReadyState}
-                    </small>
-                    <dl className="comms-ice-diagnostics">
-                      {[
-                        ['SIGNALING', 'signalingState'],
-                        ['ICE GATHER', 'iceGatheringState'],
-                        ['ICE CONNECT', 'iceConnectionState'],
-                        ['CONNECTION', 'connectionState'],
-                        ['AUDIO DIR', 'audioDirection'],
-                        ['CURRENT DIR', 'audioCurrentDirection'],
-                        ['ICE PAIR', 'icePair'],
-                        ['PAIR SOURCE', 'icePairSource'],
-                        ['PAIR STATE', 'icePairState'],
-                        ['LOCAL TYPE', 'localCandidateType'],
-                        ['REMOTE TYPE', 'remoteCandidateType'],
-                        ['LOCAL PROTO', 'localCandidateProtocol'],
-                        ['REMOTE PROTO', 'remoteCandidateProtocol'],
-                        ['TX BYTES', 'outboundAudioBytes'],
-                        ['RX BYTES', 'inboundAudioBytes'],
-                      ].map(([label, field]) => (
-                        <div key={field}>
-                          <dt>{label}</dt>
-                          <dd>{audioDiagnostics[field]}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
                 </>
               )}
 
@@ -2665,7 +2119,7 @@ export default function CommsPanel({
                   </button>
                 )}
 
-                {currentCall.kind === 'audio' && audioDiagnostics.remoteTrackExists && (
+                {currentCall.kind === 'audio' && hasRemoteAudio && (
                   <button type="button" onClick={startRemoteAudio}>
                     START AUDIO
                   </button>
