@@ -1240,6 +1240,8 @@ export default function CommsPanel({
     setVideoError('')
 
     let replacementStream = null
+    let newTrack = null
+    let senderReplaced = false
 
     try {
       replacementStream = await navigator.mediaDevices.getUserMedia({
@@ -1249,7 +1251,7 @@ export default function CommsPanel({
         },
       })
 
-      const newTrack = replacementStream.getVideoTracks()[0]
+      newTrack = replacementStream.getVideoTracks()[0]
       if (!newTrack) throw new Error('Camera did not provide a replacement video track.')
 
       if (
@@ -1264,6 +1266,7 @@ export default function CommsPanel({
       }
 
       await sender.replaceTrack(newTrack)
+      senderReplaced = true
 
       oldTrack.onended = null
       localStream.removeTrack(oldTrack)
@@ -1286,9 +1289,25 @@ export default function CommsPanel({
       setCameraFacing(nextFacing)
       setMediaRevision((value) => value + 1)
     } catch {
-      for (const track of replacementStream?.getTracks?.() || []) {
-        if (track !== sender.track) track.stop()
+      if (
+        senderReplaced &&
+        newTrack &&
+        sender.track === newTrack &&
+        oldTrack.readyState === 'live'
+      ) {
+        try {
+          await sender.replaceTrack(oldTrack)
+        } catch {
+          // Keep the current sender state if restoring the old camera also fails.
+        }
       }
+
+      if (newTrack && sender.track !== newTrack) {
+        newTrack.stop()
+      } else if (!newTrack) {
+        for (const track of replacementStream?.getTracks?.() || []) track.stop()
+      }
+
       setVideoError('VIDEO UNAVAILABLE')
     } finally {
       setVideoBusy(false)
