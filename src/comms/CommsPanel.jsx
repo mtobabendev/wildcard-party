@@ -211,6 +211,88 @@ function emptyAudioDiagnostics() {
   }
 }
 
+function emptyNegotiationDiagnostics() {
+  return {
+    role: 'UNKNOWN',
+    milestones: [],
+    localTotal: 0,
+    localHost: 0,
+    localSrflx: 0,
+    localRelay: 0,
+    localUdp: 0,
+    localTcp: 0,
+    relayPosted: 0,
+    postAttempts: 0,
+    postSuccesses: 0,
+    postFailures: 0,
+    remoteIceRetrieved: 0,
+    remoteRelayRetrieved: 0,
+    addIceAttempts: 0,
+    addIceSuccesses: 0,
+    addIceFailures: 0,
+    lastAddIceError: 'NONE',
+    iceCandidateErrorCount: 0,
+    lastIceCandidateErrorCode: 'NONE',
+    lastIceCandidateErrorCategory: 'NONE',
+    signalingTransitions: [],
+    iceGatheringTransitions: [],
+    iceConnectionTransitions: [],
+    connectionTransitions: [],
+    signalPollState: 'IDLE',
+    signalPollSuccesses: 0,
+    lastSignalCursor: '0',
+  }
+}
+
+function sanitizedDiagnosticErrorName(error) {
+  const name = typeof error?.name === 'string' ? error.name : ''
+  return [
+    'AbortError',
+    'Error',
+    'InvalidAccessError',
+    'InvalidStateError',
+    'NetworkError',
+    'NotSupportedError',
+    'OperationError',
+    'RTCError',
+    'SecurityError',
+    'SyntaxError',
+    'TypeError',
+  ].includes(name) ? name : 'UNKNOWN'
+}
+
+function iceCandidateErrorCategory(errorCode) {
+  if (errorCode === 701) return 'SERVER_UNREACHABLE'
+  if (errorCode >= 300 && errorCode < 400) return 'STUN_3XX'
+  if (errorCode >= 400 && errorCode < 500) return 'STUN_4XX'
+  if (errorCode >= 500 && errorCode < 600) return 'STUN_5XX'
+  if (errorCode >= 600 && errorCode < 700) return 'STUN_6XX'
+  return 'UNKNOWN'
+}
+
+function classifyIceCandidate(candidate) {
+  let type = typeof candidate?.type === 'string' ? candidate.type.toLowerCase() : ''
+  let protocol = typeof candidate?.protocol === 'string' ? candidate.protocol.toLowerCase() : ''
+
+  if ((!type || !protocol) && typeof candidate?.candidate === 'string') {
+    try {
+      const tokens = candidate.candidate.trim().split(/\s+/)
+      if (!protocol && tokens.length > 2) protocol = String(tokens[2]).toLowerCase()
+      if (!type) {
+        const typeIndex = tokens.indexOf('typ')
+        if (typeIndex >= 0) type = String(tokens[typeIndex + 1] || '').toLowerCase()
+      }
+    } catch {
+      // Candidate text is inspected only for sanitized type/protocol classification.
+    }
+  }
+
+  return {
+    type: ['host', 'srflx', 'prflx', 'relay'].includes(type) ? type : 'unknown',
+    protocol: ['udp', 'tcp'].includes(protocol) ? protocol : 'unknown',
+  }
+}
+
 function diagnosticRead(read) {
   try {
     const value = read()
@@ -388,6 +470,9 @@ export default function CommsPanel({
   const [signalPollingReady, setSignalPollingReady] = useState(false)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
   const [audioDiagnostics, setAudioDiagnostics] = useState(() => emptyAudioDiagnostics())
+  const [negotiationDiagnostics, setNegotiationDiagnostics] = useState(
+    () => emptyNegotiationDiagnostics(),
+  )
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -424,6 +509,96 @@ export default function CommsPanel({
   const localVideoRef = useRef(null)
   const audioDiagnosticTimerRef = useRef(null)
   const audioStatsSnapshotRef = useRef(null)
+  const candidateDiagnosticMetaRef = useRef(new WeakMap())
+
+  function updateNegotiationDiagnostics(update) {
+    setNegotiationDiagnostics((current) => {
+      const next = { ...current }
+      update(next)
+      return next
+    })
+  }
+
+  function recordMilestone(name) {
+    updateNegotiationDiagnostics((next) => {
+      next.milestones = [
+        ...next.milestones,
+        {
+          name,
+          visibility: document.visibilityState || 'UNKNOWN',
+        },
+      ].slice(-20)
+    })
+  }
+
+  function recordTransition(field, value) {
+    const normalized = typeof value === 'string' && value ? value : 'UNKNOWN'
+    updateNegotiationDiagnostics((next) => {
+      const transitions = next[field] || []
+      if (transitions[transitions.length - 1]?.state === normalized) return
+      next[field] = [
+        ...transitions,
+        {
+          state: normalized,
+          visibility: document.visibilityState || 'UNKNOWN',
+        },
+      ].slice(-12)
+    })
+  }
+
+  function observeLocalCandidate(candidate, payload) {
+    const metadata = classifyIceCandidate(candidate)
+    candidateDiagnosticMetaRef.current.set(payload, metadata)
+
+    updateNegotiationDiagnostics((next) => {
+      next.localTotal += 1
+      if (metadata.type === 'host') next.localHost += 1
+      if (metadata.type === 'srflx') next.localSrflx += 1
+      if (metadata.type === 'relay') next.localRelay += 1
+      if (metadata.protocol === 'udp') next.localUdp += 1
+      if (metadata.protocol === 'tcp') next.localTcp += 1
+    })
+  }
+
+  function observeIcePost(stage, payload) {
+    const metadata = candidateDiagnosticMetaRef.current.get(payload)
+    updateNegotiationDiagnostics((next) => {
+      if (stage === 'attempt') next.postAttempts += 1
+      if (stage === 'success') {
+        next.postSuccesses += 1
+        if (metadata?.type === 'relay') next.relayPosted += 1
+      }
+      if (stage === 'failure') next.postFailures += 1
+    })
+  }
+
+  function observeRemoteIceSignals(signals) {
+    const remoteIce = signals.filter(
+      (signal) => signal.type === 'ice' && signal.senderAccountId !== account?.id,
+    )
+    if (!remoteIce.length) return
+
+    let relayCount = 0
+    for (const signal of remoteIce) {
+      if (classifyIceCandidate(signal.payload).type === 'relay') relayCount += 1
+    }
+
+    updateNegotiationDiagnostics((next) => {
+      next.remoteIceRetrieved += remoteIce.length
+      next.remoteRelayRetrieved += relayCount
+    })
+  }
+
+  function observeAddIce(stage, error = null) {
+    updateNegotiationDiagnostics((next) => {
+      if (stage === 'attempt') next.addIceAttempts += 1
+      if (stage === 'success') next.addIceSuccesses += 1
+      if (stage === 'failure') {
+        next.addIceFailures += 1
+        next.lastAddIceError = sanitizedDiagnosticErrorName(error)
+      }
+    })
+  }
 
   useEffect(() => {
     messagesRef.current = messages
@@ -633,9 +808,11 @@ export default function CommsPanel({
     remoteOfferRef.current = null
     remoteAnswerRef.current = null
     signalSendChainRef.current = Promise.resolve()
+    candidateDiagnosticMetaRef.current = new WeakMap()
 
     if (resetState) {
       setSignalPollingReady(false)
+      setNegotiationDiagnostics(emptyNegotiationDiagnostics())
       setMediaState('idle')
       setMediaError('')
       setMediaMuted(false)
@@ -717,6 +894,7 @@ export default function CommsPanel({
 
       mediaCallIdRef.current = call.id
       localStreamRef.current = stream
+      recordMilestone('LOCAL_MEDIA_OK')
       setMediaMuted(false)
       setCameraEnabled(true)
       setMediaRevision((value) => value + 1)
@@ -732,6 +910,7 @@ export default function CommsPanel({
     let lastError = null
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (type === 'ice') observeIcePost('attempt', payload)
       try {
         const response = await requestJson('/api/comms/call-signals', {
           method: 'POST',
@@ -748,8 +927,10 @@ export default function CommsPanel({
           throw new Error('The server did not return the canonical signal.')
         }
 
+        if (type === 'ice') observeIcePost('success', payload)
         return response.signal
       } catch (requestError) {
+        if (type === 'ice') observeIcePost('failure', payload)
         lastError = requestError
         const retryable = (
           requestError?.name !== 'AbortError' &&
@@ -789,6 +970,7 @@ export default function CommsPanel({
       if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0) {
         throw new Error('ICE server configuration was empty.')
       }
+      recordMilestone('ICE_SERVERS_OK')
       return payload.iceServers
     } catch (requestError) {
       if (requestError?.name === 'AbortError') throw requestError
@@ -834,7 +1016,14 @@ export default function CommsPanel({
     pendingRemoteCandidatesRef.current = []
 
     for (const item of queued) {
-      await peer.addIceCandidate(item.payload)
+      observeAddIce('attempt')
+      try {
+        await peer.addIceCandidate(item.payload)
+        observeAddIce('success')
+      } catch (candidateError) {
+        observeAddIce('failure', candidateError)
+        throw candidateError
+      }
     }
   }
 
@@ -927,11 +1116,17 @@ export default function CommsPanel({
     mediaCallIdRef.current = call.id
     peerConnectionRef.current = peer
     remoteStreamRef.current = remoteStream
+    recordMilestone('PEER_CREATED')
+    recordTransition('signalingTransitions', peer.signalingState)
+    recordTransition('iceGatheringTransitions', peer.iceGatheringState)
+    recordTransition('iceConnectionTransitions', peer.iceConnectionState)
+    recordTransition('connectionTransitions', peer.connectionState)
 
     peer.onicecandidate = (event) => {
       if (!event.candidate) return
 
       const candidate = event.candidate.toJSON()
+      observeLocalCandidate(event.candidate, candidate)
       if (!localSdpStoredRef.current) {
         pendingLocalCandidatesRef.current.push(candidate)
         return
@@ -958,12 +1153,31 @@ export default function CommsPanel({
       }, 0)
     }
 
+    peer.onsignalingstatechange = () => {
+      recordTransition('signalingTransitions', peer.signalingState)
+    }
+
+    peer.onicegatheringstatechange = () => {
+      recordTransition('iceGatheringTransitions', peer.iceGatheringState)
+    }
+
     peer.onconnectionstatechange = () => {
+      recordTransition('connectionTransitions', peer.connectionState)
       updatePeerConnectionState(call, peer)
     }
 
     peer.oniceconnectionstatechange = () => {
+      recordTransition('iceConnectionTransitions', peer.iceConnectionState)
       updatePeerConnectionState(call, peer)
+    }
+
+    peer.onicecandidateerror = (event) => {
+      const errorCode = Number.isFinite(event?.errorCode) ? event.errorCode : null
+      updateNegotiationDiagnostics((next) => {
+        next.iceCandidateErrorCount += 1
+        next.lastIceCandidateErrorCode = errorCode ?? 'UNKNOWN'
+        next.lastIceCandidateErrorCategory = iceCandidateErrorCategory(errorCode)
+      })
     }
 
     for (const track of localStream.getTracks()) {
@@ -985,12 +1199,15 @@ export default function CommsPanel({
       try {
         const peer = await createPeerConnectionForCall(call, stream)
         const offer = await peer.createOffer()
+        recordMilestone('OFFER_CREATED')
         await peer.setLocalDescription(offer)
+        recordMilestone('LOCAL_OFFER_SET')
 
         await postSignalWithRetry(call, 'offer', {
           type: peer.localDescription.type,
           sdp: peer.localDescription.sdp,
         })
+        recordMilestone('OFFER_STORED')
 
         localSdpStoredRef.current = true
         await flushLocalCandidates(call)
@@ -1019,15 +1236,19 @@ export default function CommsPanel({
       try {
         const peer = await createPeerConnectionForCall(call, stream)
         await peer.setRemoteDescription(offerPayload)
+        recordMilestone('REMOTE_OFFER_SET')
         await flushRemoteCandidates()
 
         const answer = await peer.createAnswer()
+        recordMilestone('ANSWER_CREATED')
         await peer.setLocalDescription(answer)
+        recordMilestone('LOCAL_ANSWER_SET')
 
         await postSignalWithRetry(call, 'answer', {
           type: peer.localDescription.type,
           sdp: peer.localDescription.sdp,
         })
+        recordMilestone('ANSWER_STORED')
 
         localSdpStoredRef.current = true
         await flushLocalCandidates(call)
@@ -1072,6 +1293,7 @@ export default function CommsPanel({
       if (!peer.remoteDescription) {
         try {
           await peer.setRemoteDescription(signal.payload)
+          recordMilestone('REMOTE_ANSWER_SET')
           await flushRemoteCandidates()
         } catch {
           setSignalPollingReady(false)
@@ -1093,9 +1315,12 @@ export default function CommsPanel({
         return
       }
 
+      observeAddIce('attempt')
       try {
         await peer.addIceCandidate(signal.payload)
-      } catch {
+        observeAddIce('success')
+      } catch (candidateError) {
+        observeAddIce('failure', candidateError)
         setSignalPollingReady(false)
         setMediaState('failed')
         setMediaError('MEDIA CANDIDATE FAILED')
@@ -1115,6 +1340,7 @@ export default function CommsPanel({
       )
 
       const page = Array.isArray(payload.signals) ? payload.signals : []
+      observeRemoteIceSignals(page)
       signals.push(...page)
 
       const nextAfter = typeof payload.nextAfter === 'string'
@@ -1146,11 +1372,15 @@ export default function CommsPanel({
       )
 
       const signals = Array.isArray(payload.signals) ? payload.signals : []
+      observeRemoteIceSignals(signals)
 
       for (const signal of signals) {
         await processRemoteSignal(call, signal)
         cursor = signal.sequence
         signalCursorRef.current = cursor
+        updateNegotiationDiagnostics((next) => {
+          next.lastSignalCursor = cursor
+        })
       }
 
       const nextAfter = typeof payload.nextAfter === 'string'
@@ -1160,6 +1390,9 @@ export default function CommsPanel({
       if (signals.length === 0) {
         cursor = nextAfter
         signalCursorRef.current = cursor
+        updateNegotiationDiagnostics((next) => {
+          next.lastSignalCursor = cursor
+        })
       }
 
       if (!payload.hasMore) break
@@ -1186,6 +1419,10 @@ export default function CommsPanel({
       }
 
       const caller = call.callerAccountId === account?.id
+      updateNegotiationDiagnostics((next) => {
+        next.role = caller ? 'CALLER' : 'CALLEE'
+        next.lastSignalCursor = backlog.nextAfter
+      })
       const ownOffer = backlog.signals.find(
         (signal) => signal.type === 'offer' && signal.senderAccountId === account?.id,
       )
@@ -2054,14 +2291,32 @@ export default function CommsPanel({
     const cadence = mediaState === 'live' ? 5000 : 900
 
     const pollSignals = async () => {
-      if (document.hidden || inFlight) return
+      if (document.hidden) {
+        updateNegotiationDiagnostics((next) => {
+          next.signalPollState = 'HIDDEN-SKIP'
+        })
+        return
+      }
+      if (inFlight) {
+        updateNegotiationDiagnostics((next) => {
+          next.signalPollState = 'IN-FLIGHT'
+        })
+        return
+      }
 
+      updateNegotiationDiagnostics((next) => {
+        next.signalPollState = 'ACTIVE'
+      })
       inFlight = true
       controller = new AbortController()
       signalPollControllerRef.current = controller
 
       try {
         await pollSignalCatchup(call, controller)
+        updateNegotiationDiagnostics((next) => {
+          next.signalPollSuccesses += 1
+          next.signalPollState = 'ACTIVE'
+        })
       } catch (requestError) {
         if (
           requestError?.name !== 'AbortError' &&
@@ -2625,6 +2880,73 @@ export default function CommsPanel({
                         <div key={field}>
                           <dt>{label}</dt>
                           <dd>{audioDiagnostics[field]}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <strong>NEGOTIATION TRACE</strong>
+                    <dl className="comms-ice-diagnostics">
+                      <div><dt>ROLE</dt><dd>{negotiationDiagnostics.role}</dd></div>
+                      <div><dt>LOCAL ICE</dt><dd>{negotiationDiagnostics.localTotal}</dd></div>
+                      <div><dt>HOST</dt><dd>{negotiationDiagnostics.localHost}</dd></div>
+                      <div><dt>SRFLX</dt><dd>{negotiationDiagnostics.localSrflx}</dd></div>
+                      <div><dt>RELAY</dt><dd>{negotiationDiagnostics.localRelay}</dd></div>
+                      <div><dt>UDP</dt><dd>{negotiationDiagnostics.localUdp}</dd></div>
+                      <div><dt>TCP</dt><dd>{negotiationDiagnostics.localTcp}</dd></div>
+                      <div><dt>POST ATTEMPTS</dt><dd>{negotiationDiagnostics.postAttempts}</dd></div>
+                      <div><dt>POST SUCCESS</dt><dd>{negotiationDiagnostics.postSuccesses}</dd></div>
+                      <div><dt>POST FAIL</dt><dd>{negotiationDiagnostics.postFailures}</dd></div>
+                      <div><dt>REMOTE ICE</dt><dd>{negotiationDiagnostics.remoteIceRetrieved}</dd></div>
+                      <div><dt>ADD ATTEMPTS</dt><dd>{negotiationDiagnostics.addIceAttempts}</dd></div>
+                      <div><dt>ADD SUCCESS</dt><dd>{negotiationDiagnostics.addIceSuccesses}</dd></div>
+                      <div><dt>ADD FAIL</dt><dd>{negotiationDiagnostics.addIceFailures}</dd></div>
+                      <div><dt>LAST ADD ERROR</dt><dd>{negotiationDiagnostics.lastAddIceError}</dd></div>
+                      <div><dt>ICE ERRORS</dt><dd>{negotiationDiagnostics.iceCandidateErrorCount}</dd></div>
+                      <div><dt>ICE ERROR CODE</dt><dd>{negotiationDiagnostics.lastIceCandidateErrorCode}</dd></div>
+                      <div><dt>ICE ERROR CLASS</dt><dd>{negotiationDiagnostics.lastIceCandidateErrorCategory}</dd></div>
+                      <div><dt>SIGNAL POLL</dt><dd>{negotiationDiagnostics.signalPollState}</dd></div>
+                      <div><dt>POLL SUCCESS</dt><dd>{negotiationDiagnostics.signalPollSuccesses}</dd></div>
+                      <div><dt>LAST CURSOR</dt><dd>{negotiationDiagnostics.lastSignalCursor}</dd></div>
+                    </dl>
+                    <strong>RELAY CHECKPOINT</strong>
+                    <dl className="comms-ice-diagnostics">
+                      <div><dt>LOCAL RELAY GENERATED</dt><dd>{negotiationDiagnostics.localRelay}</dd></div>
+                      <div><dt>LOCAL RELAY POSTED</dt><dd>{negotiationDiagnostics.relayPosted}</dd></div>
+                      <div><dt>REMOTE RELAY RETRIEVED</dt><dd>{negotiationDiagnostics.remoteRelayRetrieved}</dd></div>
+                      <div>
+                        <dt>ADD ICE</dt>
+                        <dd>
+                          {negotiationDiagnostics.addIceSuccesses} OK / {negotiationDiagnostics.addIceFailures} FAIL
+                        </dd>
+                      </div>
+                    </dl>
+                    <strong>MILESTONES</strong>
+                    <div className="comms-audio-diagnostic-meta">
+                      {negotiationDiagnostics.milestones.length
+                        ? negotiationDiagnostics.milestones.map((item, index) => (
+                            <span key={`${item.name}-${index}`}>
+                              {item.name}
+                              <b>{item.visibility}</b>
+                            </span>
+                          ))
+                        : <span>NONE</span>}
+                    </div>
+                    <strong>STATE TRANSITIONS</strong>
+                    <dl className="comms-ice-diagnostics">
+                      {[
+                        ['SIGNALING', 'signalingTransitions'],
+                        ['ICE GATHER', 'iceGatheringTransitions'],
+                        ['ICE CONNECT', 'iceConnectionTransitions'],
+                        ['CONNECTION', 'connectionTransitions'],
+                      ].map(([label, field]) => (
+                        <div key={field}>
+                          <dt>{label}</dt>
+                          <dd>
+                            {negotiationDiagnostics[field].length
+                              ? negotiationDiagnostics[field]
+                                  .map((item) => `${item.state}[${item.visibility}]`)
+                                  .join(' > ')
+                              : 'NONE'}
+                          </dd>
                         </div>
                       ))}
                     </dl>
