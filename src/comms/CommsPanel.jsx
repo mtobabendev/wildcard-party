@@ -1106,16 +1106,6 @@ export default function CommsPanel({
       setAutoplayBlocked(true)
     }
 
-    setAudioDiagnostics((current) => ({
-      ...current,
-      playback: audio.muted
-        ? 'muted'
-        : audio.paused
-          ? 'paused'
-          : 'playing',
-      playbackVolume: audio.volume,
-      playbackReadyState: audio.readyState,
-    }))
   }
 
   async function startCall(kind) {
