@@ -777,6 +777,9 @@ export default function CommsPanel({
     const peer = peerConnectionRef.current
     if (peer) {
       peer.onicecandidate = null
+      peer.onicecandidateerror = null
+      peer.onsignalingstatechange = null
+      peer.onicegatheringstatechange = null
       peer.ontrack = null
       peer.onconnectionstatechange = null
       peer.oniceconnectionstatechange = null
