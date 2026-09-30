@@ -1562,6 +1562,30 @@ export default function CommsPanel({
 
   useEffect(() => {
     const call = currentCall
+    if (!account?.id || call?.status !== 'accepted') {
+      if (mediaCallIdRef.current) {
+        cleanupMediaSession()
+      }
+      return undefined
+    }
+
+    cleanupMediaSession()
+
+    const controller = new AbortController()
+    mediaBootstrapControllerRef.current = controller
+
+    bootstrapAcceptedMedia(call, controller)
+
+    return () => {
+      if (mediaBootstrapControllerRef.current === controller) {
+        controller.abort()
+        mediaBootstrapControllerRef.current = null
+      }
+    }
+  }, [account?.id, currentCall?.id, currentCall?.status, mediaRetryNonce])
+
+  useEffect(() => {
+    const call = currentCall
     if (
       !account?.id ||
       call?.status !== 'accepted' ||
