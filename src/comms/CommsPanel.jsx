@@ -237,6 +237,7 @@ function diagnosticSnapshotText(snapshot) {
   const selected = snapshot.selectedPair
   const sent = snapshot.signals.sent
   const received = snapshot.signals.received
+  const deliveryBatches = snapshot.signalDelivery?.batches || []
 
   return [
     'RUNTIME CONNECTION DIAGNOSTICS',
@@ -276,6 +277,14 @@ function diagnosticSnapshotText(snapshot) {
     `INBOUND AUDIO: bytesReceived=${snapshot.rtp.inboundAudioBytes}`,
     `OUTBOUND VIDEO: bytesSent=${snapshot.rtp.outboundVideoBytes}`,
     `INBOUND VIDEO: bytesReceived=${snapshot.rtp.inboundVideoBytes}`,
+    '',
+    'SIGNAL DELIVERY BOUNDARY',
+    `GET RESPONSES OBSERVED: ${deliveryBatches.length}`,
+    ...deliveryBatches.flatMap((batch, index) => [
+      `GET #${index + 1}: call=${batch.callId} // after=${batch.after} // HTTP=${batch.httpStatus} // rows=${batch.rowCount} // nextAfter=${batch.nextAfter} // hasMore=${batch.hasMore ? 'YES' : 'NO'}`,
+      `RETURNED: offer=${batch.returned.offer} // answer=${batch.returned.answer} // ice=${batch.returned.ice} // remote=${batch.remoteCount} // self=${batch.selfCount} // seq=${batch.lowestSequence || 'NONE'}..${batch.highestSequence || 'NONE'}`,
+      `PROCESSING: presented=${batch.processing.presented} // processed=${batch.processing.processed} // skippedSelf=${batch.processing.skippedSelf} // skippedOther=${batch.processing.skippedOther} // offerPresented=${batch.processing.offerPresented} // offerProcessed=${batch.processing.offerProcessed} // icePresented=${batch.processing.icePresented} // iceProcessed=${batch.processing.iceProcessed} // cursorBefore=${batch.processing.cursorBefore ?? 'N/A'} // cursorAfter=${batch.processing.cursorAfter ?? 'N/A'}`,
+    ]),
     '',
     `FIRST OBSERVED FAILURE: ${snapshot.firstFailure}`,
   ].join('\n')
@@ -376,6 +385,10 @@ export default function CommsPanel({
     received: diagnosticSignalCounts(),
   })
   const diagnosticPollingActiveRef = useRef(false)
+  const diagnosticSignalDeliveryRef = useRef({
+    batches: [],
+    sequenceToBatch: new Map(),
+  })
 
   function resetConnectionDiagnostics(callId = null) {
     diagnosticCallIdRef.current = callId
@@ -398,7 +411,133 @@ export default function CommsPanel({
       received: diagnosticSignalCounts(),
     }
     diagnosticPollingActiveRef.current = false
+    diagnosticSignalDeliveryRef.current = {
+      batches: [],
+      sequenceToBatch: new Map(),
+    }
     setConnectionDiagnostics(null)
+  }
+
+  function truncateDiagnosticId(value) {
+    const text = String(value || '')
+    if (!text) return 'UNKNOWN'
+    return text.length > 14 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text
+  }
+
+  function signalTypeCounts(signals) {
+    const counts = {
+      offer: 0,
+      answer: 0,
+      ice: 0,
+    }
+
+    for (const signal of signals) {
+      if (signal?.type in counts) counts[signal.type] += 1
+    }
+
+    return counts
+  }
+
+  function recordSignalGetDiagnostic({
+    callId,
+    after,
+    httpStatus,
+    payload,
+    cursorBefore,
+  }) {
+    const signals = Array.isArray(payload?.signals) ? payload.signals : []
+    const returned = signalTypeCounts(signals)
+    let remoteCount = 0
+    let selfCount = 0
+    let lowestSequence = null
+    let highestSequence = null
+
+    for (const signal of signals) {
+      if (signal?.senderAccountId === account?.id) {
+        selfCount += 1
+      } else {
+        remoteCount += 1
+      }
+
+      const sequence = typeof signal?.sequence === 'string' ? signal.sequence : ''
+      if (sequence) {
+        if (lowestSequence === null || BigInt(sequence) < BigInt(lowestSequence)) {
+          lowestSequence = sequence
+        }
+        if (highestSequence === null || BigInt(sequence) > BigInt(highestSequence)) {
+          highestSequence = sequence
+        }
+      }
+    }
+
+    const batch = {
+      callId: truncateDiagnosticId(callId),
+      after: String(after ?? ''),
+      httpStatus,
+      rowCount: signals.length,
+      nextAfter: typeof payload?.nextAfter === 'string' ? payload.nextAfter : String(after ?? ''),
+      hasMore: Boolean(payload?.hasMore),
+      returned,
+      remoteCount,
+      selfCount,
+      lowestSequence,
+      highestSequence,
+      processing: {
+        presented: 0,
+        processed: 0,
+        skippedSelf: 0,
+        skippedOther: 0,
+        offerPresented: 0,
+        offerProcessed: 0,
+        icePresented: 0,
+        iceProcessed: 0,
+        cursorBefore: String(cursorBefore ?? ''),
+        cursorAfter: String(cursorBefore ?? ''),
+      },
+    }
+
+    const delivery = diagnosticSignalDeliveryRef.current
+    const batchIndex = delivery.batches.push(batch) - 1
+
+    for (const signal of signals) {
+      if (typeof signal?.sequence === 'string' && signal.sequence) {
+        delivery.sequenceToBatch.set(signal.sequence, batchIndex)
+      }
+    }
+
+    return batchIndex
+  }
+
+  function recordSignalProcessingDiagnostic(signal, cursorBefore, cursorAfter) {
+    const sequence = typeof signal?.sequence === 'string' ? signal.sequence : ''
+    const delivery = diagnosticSignalDeliveryRef.current
+    const batchIndex = sequence ? delivery.sequenceToBatch.get(sequence) : undefined
+    if (!Number.isInteger(batchIndex)) return
+
+    const batch = delivery.batches[batchIndex]
+    if (!batch) return
+
+    const processing = batch.processing
+    processing.presented += 1
+    processing.cursorBefore = String(cursorBefore ?? processing.cursorBefore ?? '')
+    processing.cursorAfter = String(cursorAfter ?? processing.cursorAfter ?? '')
+
+    if (signal?.type === 'offer') processing.offerPresented += 1
+    if (signal?.type === 'ice') processing.icePresented += 1
+
+    if (!signal?.sequence) {
+      processing.skippedOther += 1
+      return
+    }
+
+    if (signal.senderAccountId === account?.id) {
+      processing.skippedSelf += 1
+      return
+    }
+
+    processing.processed += 1
+    if (signal.type === 'offer') processing.offerProcessed += 1
+    if (signal.type === 'ice') processing.iceProcessed += 1
   }
 
   function countDiagnosticSignal(bucket, type, payload) {
@@ -1172,7 +1311,13 @@ export default function CommsPanel({
     return mediaSetupPromiseRef.current
   }
 
-  async function processRemoteSignal(call, signal) {
+  async function processRemoteSignal(call, signal, diagnosticCursorBefore = null) {
+    recordSignalProcessingDiagnostic(
+      signal,
+      diagnosticCursorBefore,
+      signal?.sequence || diagnosticCursorBefore,
+    )
+
     if (!signal?.sequence || signal.senderAccountId === account?.id) return
 
     countDiagnosticSignal(
@@ -1243,17 +1388,28 @@ export default function CommsPanel({
 
     while (true) {
       diagnosticSignalsRef.current.getAttempts += 1
+      const requestedAfter = cursor
+      let responseStatus = null
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(callId)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
         ({ status, ok }) => {
+          responseStatus = status
           diagnosticSignalsRef.current.getLastStatus = status
           if (ok) {
             diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
           }
         },
       )
+
+      recordSignalGetDiagnostic({
+        callId,
+        after: requestedAfter,
+        httpStatus: responseStatus,
+        payload,
+        cursorBefore: requestedAfter,
+      })
 
       const page = Array.isArray(payload.signals) ? payload.signals : []
       signals.push(...page)
@@ -1281,11 +1437,14 @@ export default function CommsPanel({
 
     while (true) {
       diagnosticSignalsRef.current.getAttempts += 1
+      const requestedAfter = cursor
+      let responseStatus = null
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(call.id)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
         ({ status, ok }) => {
+          responseStatus = status
           diagnosticSignalsRef.current.getLastStatus = status
           if (ok) {
             diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
@@ -1293,10 +1452,18 @@ export default function CommsPanel({
         },
       )
 
+      recordSignalGetDiagnostic({
+        callId: call.id,
+        after: requestedAfter,
+        httpStatus: responseStatus,
+        payload,
+        cursorBefore: requestedAfter,
+      })
+
       const signals = Array.isArray(payload.signals) ? payload.signals : []
 
       for (const signal of signals) {
-        await processRemoteSignal(call, signal)
+        await processRemoteSignal(call, signal, cursor)
         cursor = signal.sequence
         signalCursorRef.current = cursor
       }
@@ -1357,11 +1524,13 @@ export default function CommsPanel({
       setSignalPollingReady(true)
 
       let sawOffer = false
+      let diagnosticBacklogCursor = '0'
       for (const signal of backlog.signals) {
         if (signal.type === 'offer' && signal.senderAccountId !== account?.id) {
           sawOffer = true
         }
-        await processRemoteSignal(call, signal)
+        await processRemoteSignal(call, signal, diagnosticBacklogCursor)
+        diagnosticBacklogCursor = signal.sequence || diagnosticBacklogCursor
       }
 
       if (!sawOffer) {
@@ -2273,6 +2442,14 @@ export default function CommsPanel({
           ? `${callId.slice(0, 8)}…${callId.slice(-4)}`
           : callId || 'UNKNOWN'
 
+        const deliverySnapshot = {
+          batches: diagnosticSignalDeliveryRef.current.batches.map((batch) => ({
+            ...batch,
+            returned: { ...batch.returned },
+            processing: { ...batch.processing },
+          })),
+        }
+
         const snapshot = {
           call: {
             id: safeCallId,
@@ -2310,6 +2487,7 @@ export default function CommsPanel({
           },
           ice,
           signals,
+          signalDelivery: deliverySnapshot,
           candidates: {
             local: localCandidateCounts,
             remote: remoteCandidateCounts,
