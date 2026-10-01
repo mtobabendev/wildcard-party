@@ -2240,9 +2240,12 @@ export default function CommsPanel({
         ) {
           firstFailure = 'NO OFFER CREATED'
         } else if (
-          peer?.localDescription &&
+          peer &&
           !peer.remoteDescription &&
-          (signals.sent.offer > 0 || signals.received.offer > 0)
+          (
+            (role === 'CALLER' && signals.received.answer > 0) ||
+            (role === 'CALLEE' && signals.received.offer > 0)
+          )
         ) {
           firstFailure = 'NO REMOTE DESCRIPTION'
         } else if (
