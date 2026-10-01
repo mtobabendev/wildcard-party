@@ -213,7 +213,6 @@ export default function CommsPanel({
   const [mediaError, setMediaError] = useState('')
   const [mediaMuted, setMediaMuted] = useState(false)
   const [cameraEnabled, setCameraEnabled] = useState(false)
-  const [cameraFacing, setCameraFacing] = useState('user')
   const [videoReady, setVideoReady] = useState(false)
   const [videoBusy, setVideoBusy] = useState(false)
   const [videoError, setVideoError] = useState('')
@@ -477,7 +476,6 @@ export default function CommsPanel({
       setMediaError('')
       setMediaMuted(false)
       setCameraEnabled(false)
-      setCameraFacing('user')
       setVideoReady(false)
       setVideoBusy(false)
       setVideoError('')
@@ -1209,105 +1207,6 @@ export default function CommsPanel({
       setMediaRevision((value) => value + 1)
     } catch {
       for (const track of cameraStream?.getTracks?.() || []) track.stop()
-      setVideoError('VIDEO UNAVAILABLE')
-    } finally {
-      setVideoBusy(false)
-    }
-  }
-
-  async function switchCamera() {
-    const call = currentCallRef.current
-    const peer = peerConnectionRef.current
-    const sender = videoSenderRef.current
-    const localStream = localStreamRef.current
-    const oldTrack = localStream?.getVideoTracks?.()[0] || null
-
-    if (
-      call?.status !== 'accepted' ||
-      !peer ||
-      !sender ||
-      !cameraEnabled ||
-      !oldTrack ||
-      videoBusy ||
-      !navigator.mediaDevices?.getUserMedia
-    ) {
-      return
-    }
-
-    const nextFacing = cameraFacing === 'environment' ? 'user' : 'environment'
-
-    setVideoBusy(true)
-    setVideoError('')
-
-    let replacementStream = null
-    let newTrack = null
-    let senderReplaced = false
-
-    try {
-      replacementStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: nextFacing },
-        },
-      })
-
-      newTrack = replacementStream.getVideoTracks()[0]
-      if (!newTrack) throw new Error('Camera did not provide a replacement video track.')
-
-      if (
-        currentCallRef.current?.id !== call.id ||
-        currentCallRef.current?.status !== 'accepted' ||
-        peerConnectionRef.current !== peer ||
-        videoSenderRef.current !== sender ||
-        localStreamRef.current !== localStream
-      ) {
-        for (const staleTrack of replacementStream.getTracks()) staleTrack.stop()
-        return
-      }
-
-      await sender.replaceTrack(newTrack)
-      senderReplaced = true
-
-      oldTrack.onended = null
-      localStream.removeTrack(oldTrack)
-      localStream.addTrack(newTrack)
-
-      newTrack.onended = () => {
-        if (localStreamRef.current?.getVideoTracks?.().some((current) => current.id === newTrack.id)) {
-          localStreamRef.current.removeTrack(newTrack)
-        }
-        if (videoSenderRef.current?.track === newTrack) {
-          videoSenderRef.current.replaceTrack(null).catch(() => {})
-        }
-        setCameraEnabled(false)
-        setVideoError('VIDEO UNAVAILABLE')
-        if (localVideoRef.current) localVideoRef.current.srcObject = null
-        setMediaRevision((value) => value + 1)
-      }
-
-      oldTrack.stop()
-      setCameraFacing(nextFacing)
-      setMediaRevision((value) => value + 1)
-    } catch {
-      if (
-        senderReplaced &&
-        newTrack &&
-        sender.track === newTrack &&
-        oldTrack.readyState === 'live'
-      ) {
-        try {
-          await sender.replaceTrack(oldTrack)
-        } catch {
-          // Keep the current sender state if restoring the old camera also fails.
-        }
-      }
-
-      if (newTrack && sender.track !== newTrack) {
-        newTrack.stop()
-      } else if (!newTrack) {
-        for (const track of replacementStream?.getTracks?.() || []) track.stop()
-      }
-
       setVideoError('VIDEO UNAVAILABLE')
     } finally {
       setVideoBusy(false)
@@ -2416,17 +2315,6 @@ export default function CommsPanel({
                       : cameraEnabled
                         ? 'STOP VIDEO'
                         : 'START VIDEO'}
-                  </button>
-                )}
-
-                {videoReady && cameraEnabled && mediaState !== 'redial' && (
-                  <button
-                    type="button"
-                    className="comms-camera-switch"
-                    onClick={switchCamera}
-                    disabled={videoBusy}
-                  >
-                    SWITCH CAMERA
                   </button>
                 )}
 
