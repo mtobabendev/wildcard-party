@@ -483,6 +483,56 @@
   justify-content: flex-end;
 }
 
+.comms-connection-diagnostics {
+  flex: 1 1 100%;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  background: rgba(0,0,0,.58);
+  padding: 9px 10px;
+}
+
+.comms-connection-diagnostics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.comms-connection-diagnostics-head strong {
+  color: #d9d5df;
+  font-size: 8px;
+  letter-spacing: .08em;
+}
+
+.comms-connection-diagnostics-head button {
+  border: 1px solid rgba(64,217,255,.24);
+  border-radius: 7px;
+  background: rgba(64,217,255,.06);
+  color: #92eaff;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .06em;
+}
+
+.comms-connection-diagnostics-head button:disabled {
+  opacity: .38;
+  cursor: default;
+}
+
+.comms-connection-diagnostics pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #bdb8c4;
+  font: 7px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .comms-back {
   display: none;
   border: 1px solid var(--line);
@@ -846,6 +896,24 @@
 }
 
 @media (max-width: 820px) {
+  .comms-connection-diagnostics {
+    padding: 8px;
+  }
+
+  .comms-connection-diagnostics-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .comms-connection-diagnostics-head button {
+    min-height: 40px;
+  }
+
+  .comms-connection-diagnostics pre {
+    font-size: 7px;
+    line-height: 1.5;
+  }
+
   .comms-panel {
     min-height: 540px;
   }
