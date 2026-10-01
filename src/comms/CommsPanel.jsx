@@ -438,6 +438,14 @@ export default function CommsPanel({
     return counts
   }
 
+  function compareDiagnosticSequence(left, right) {
+    const a = String(left || '').replace(/^0+(?=\d)/, '')
+    const b = String(right || '').replace(/^0+(?=\d)/, '')
+    if (a.length !== b.length) return a.length < b.length ? -1 : 1
+    if (a === b) return 0
+    return a < b ? -1 : 1
+  }
+
   function recordSignalGetDiagnostic({
     callId,
     after,
@@ -461,10 +469,16 @@ export default function CommsPanel({
 
       const sequence = typeof signal?.sequence === 'string' ? signal.sequence : ''
       if (sequence) {
-        if (lowestSequence === null || BigInt(sequence) < BigInt(lowestSequence)) {
+        if (
+          lowestSequence === null ||
+          compareDiagnosticSequence(sequence, lowestSequence) < 0
+        ) {
           lowestSequence = sequence
         }
-        if (highestSequence === null || BigInt(sequence) > BigInt(highestSequence)) {
+        if (
+          highestSequence === null ||
+          compareDiagnosticSequence(sequence, highestSequence) > 0
+        ) {
           highestSequence = sequence
         }
       }
