@@ -184,6 +184,103 @@ function sleep(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+function diagnosticSignalCounts() {
+  return {
+    offer: 0,
+    answer: 0,
+    ice: 0,
+    eoc: 0,
+  }
+}
+
+function diagnosticCandidateCounts() {
+  return {
+    host: 0,
+    srflx: 0,
+    relay: 0,
+  }
+}
+
+function diagnosticTrackSnapshot(track) {
+  return {
+    present: Boolean(track),
+    readyState: track?.readyState || null,
+    enabled: typeof track?.enabled === 'boolean' ? track.enabled : null,
+    muted: typeof track?.muted === 'boolean' ? track.muted : null,
+  }
+}
+
+function diagnosticTrackText(label, track) {
+  if (!track?.present) return `${label}: MISSING`
+  return [
+    `${label}: PRESENT`,
+    `readyState=${track.readyState || 'UNKNOWN'}`,
+    `enabled=${track.enabled == null ? 'UNKNOWN' : track.enabled ? 'YES' : 'NO'}`,
+    `muted=${track.muted == null ? 'UNKNOWN' : track.muted ? 'YES' : 'NO'}`,
+  ].join(' // ')
+}
+
+function diagnosticSenderText(label, sender) {
+  if (!sender?.present) return `${label}: MISSING`
+  return [
+    `${label}: PRESENT`,
+    `track=${sender.trackPresent ? 'PRESENT' : 'NULL'}`,
+    `readyState=${sender.trackReadyState || 'N/A'}`,
+  ].join(' // ')
+}
+
+function diagnosticSnapshotText(snapshot) {
+  if (!snapshot) return 'RUNTIME DIAGNOSTICS // WAITING FOR ACCEPTED CALL'
+
+  const localCandidates = snapshot.candidates.local
+  const remoteCandidates = snapshot.candidates.remote
+  const selected = snapshot.selectedPair
+  const sent = snapshot.signals.sent
+  const received = snapshot.signals.received
+
+  return [
+    'RUNTIME CONNECTION DIAGNOSTICS',
+    `CALL: ${snapshot.call.id} // role=${snapshot.call.role} // accepted=${snapshot.call.accepted ? 'YES' : 'NO'}`,
+    '',
+    diagnosticTrackText('MIC TRACK', snapshot.media.mic),
+    diagnosticTrackText('LOCAL VIDEO TRACK', snapshot.media.localVideo),
+    diagnosticSenderText('AUDIO SENDER', snapshot.media.audioSender),
+    diagnosticSenderText('VIDEO SENDER', snapshot.media.videoSender),
+    `REMOTE STREAM: ${snapshot.media.remoteStreamPresent ? 'PRESENT' : 'MISSING'} // audio=${snapshot.media.remoteAudioCount} // video=${snapshot.media.remoteVideoCount}`,
+    diagnosticTrackText('REMOTE AUDIO', snapshot.media.remoteAudio),
+    diagnosticTrackText('REMOTE VIDEO', snapshot.media.remoteVideo),
+    '',
+    `PEER: signaling=${snapshot.peer.signalingState} // connection=${snapshot.peer.connectionState} // iceConnection=${snapshot.peer.iceConnectionState} // iceGathering=${snapshot.peer.iceGatheringState}`,
+    `LOCAL DESCRIPTION: ${snapshot.peer.localDescriptionPresent ? 'PRESENT' : 'MISSING'} // type=${snapshot.peer.localDescriptionType || 'null'}`,
+    `REMOTE DESCRIPTION: ${snapshot.peer.remoteDescriptionPresent ? 'PRESENT' : 'MISSING'} // type=${snapshot.peer.remoteDescriptionType || 'null'}`,
+    '',
+    `ICE SERVER REQUEST: ${snapshot.ice.status} // HTTP=${snapshot.ice.httpStatus ?? 'N/A'}`,
+    `ICE SERVERS: count=${snapshot.ice.serverCount} // STUN=${snapshot.ice.hasStun ? 'YES' : 'NO'} // TURN=${snapshot.ice.hasTurn ? 'YES' : 'NO'}`,
+    `ICE ERROR: ${snapshot.ice.error || 'NONE'}`,
+    '',
+    `SIGNAL POLLING: ${snapshot.signals.pollingActive ? 'ACTIVE' : 'INACTIVE'}`,
+    `GET: attempts=${snapshot.signals.getAttempts} // lastHTTP=${snapshot.signals.getLastStatus ?? 'N/A'} // lastSuccess=${snapshot.signals.getLastSuccess || 'NEVER'}`,
+    `POST: attempts=${snapshot.signals.postAttempts} // lastHTTP=${snapshot.signals.postLastStatus ?? 'N/A'} // lastSuccess=${snapshot.signals.postLastSuccess || 'NEVER'}`,
+    `OFFER: sent=${sent.offer} / received=${received.offer}`,
+    `ANSWER: sent=${sent.answer} / received=${received.answer}`,
+    `ICE: sent=${sent.ice} / received=${received.ice}`,
+    `EOC: sent=${sent.eoc} / received=${received.eoc}`,
+    '',
+    `LOCAL CANDIDATES: host=${localCandidates.host} // srflx=${localCandidates.srflx} // relay=${localCandidates.relay}`,
+    `REMOTE CANDIDATES: host=${remoteCandidates.host} // srflx=${remoteCandidates.srflx} // relay=${remoteCandidates.relay}`,
+    selected.present
+      ? `SELECTED PAIR: ${selected.localType || 'UNKNOWN'} -> ${selected.remoteType || 'UNKNOWN'} // state=${selected.state || 'UNKNOWN'} // nominated=${selected.nominated == null ? 'UNKNOWN' : selected.nominated ? 'YES' : 'NO'}`
+      : 'SELECTED PAIR: NONE',
+    '',
+    `OUTBOUND AUDIO: bytesSent=${snapshot.rtp.outboundAudioBytes}`,
+    `INBOUND AUDIO: bytesReceived=${snapshot.rtp.inboundAudioBytes}`,
+    `OUTBOUND VIDEO: bytesSent=${snapshot.rtp.outboundVideoBytes}`,
+    `INBOUND VIDEO: bytesReceived=${snapshot.rtp.inboundVideoBytes}`,
+    '',
+    `FIRST OBSERVED FAILURE: ${snapshot.firstFailure}`,
+  ].join('\n')
+}
+
 export default function CommsPanel({
   account,
   accountLoading = false,
@@ -222,6 +319,7 @@ export default function CommsPanel({
   const [signalPollingReady, setSignalPollingReady] = useState(false)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
   const [hasRemoteAudio, setHasRemoteAudio] = useState(false)
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState(null)
 
   const messageViewportRef = useRef(null)
   const historyControllerRef = useRef(null)
@@ -258,6 +356,64 @@ export default function CommsPanel({
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
+  const diagnosticCallIdRef = useRef(null)
+  const diagnosticIceRef = useRef({
+    status: 'NOT STARTED',
+    httpStatus: null,
+    serverCount: 0,
+    hasStun: false,
+    hasTurn: false,
+    error: '',
+  })
+  const diagnosticSignalsRef = useRef({
+    getAttempts: 0,
+    getLastStatus: null,
+    getLastSuccess: '',
+    postAttempts: 0,
+    postLastStatus: null,
+    postLastSuccess: '',
+    sent: diagnosticSignalCounts(),
+    received: diagnosticSignalCounts(),
+  })
+  const diagnosticPollingActiveRef = useRef(false)
+
+  function resetConnectionDiagnostics(callId = null) {
+    diagnosticCallIdRef.current = callId
+    diagnosticIceRef.current = {
+      status: 'NOT STARTED',
+      httpStatus: null,
+      serverCount: 0,
+      hasStun: false,
+      hasTurn: false,
+      error: '',
+    }
+    diagnosticSignalsRef.current = {
+      getAttempts: 0,
+      getLastStatus: null,
+      getLastSuccess: '',
+      postAttempts: 0,
+      postLastStatus: null,
+      postLastSuccess: '',
+      sent: diagnosticSignalCounts(),
+      received: diagnosticSignalCounts(),
+    }
+    diagnosticPollingActiveRef.current = false
+    setConnectionDiagnostics(null)
+  }
+
+  function countDiagnosticSignal(bucket, type, payload) {
+    if (!bucket) return
+    if (type === 'offer' || type === 'answer') {
+      bucket[type] += 1
+      return
+    }
+    if (type !== 'ice') return
+    if (payload?.candidate === '') {
+      bucket.eoc += 1
+    } else {
+      bucket.ice += 1
+    }
+  }
 
   useEffect(() => {
     messagesRef.current = messages
@@ -348,7 +504,12 @@ export default function CommsPanel({
     messageViewportRef.current.scrollTop = messageViewportRef.current.scrollHeight
   }, [messages])
 
-  async function requestJson(url, options = {}, suppliedController = null) {
+  async function requestJson(
+    url,
+    options = {},
+    suppliedController = null,
+    diagnosticResponseObserver = null,
+  ) {
     const controller = suppliedController || new AbortController()
     allControllersRef.current.add(controller)
 
@@ -358,6 +519,16 @@ export default function CommsPanel({
         cache: 'no-store',
         signal: controller.signal,
       })
+
+      try {
+        diagnosticResponseObserver?.({
+          status: response.status,
+          ok: response.ok,
+        })
+      } catch {
+        // Diagnostic observation must never affect request behavior.
+      }
+
       const payload = await response.json().catch(() => ({}))
 
       if (!response.ok) {
@@ -391,6 +562,13 @@ export default function CommsPanel({
     if (terminalCallTimerRef.current) {
       window.clearTimeout(terminalCallTimerRef.current)
       terminalCallTimerRef.current = null
+    }
+
+    if (
+      call?.status === 'accepted' &&
+      diagnosticCallIdRef.current !== call.id
+    ) {
+      resetConnectionDiagnostics(call.id)
     }
 
     currentCallRef.current = call || null
@@ -573,21 +751,34 @@ export default function CommsPanel({
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const response = await requestJson('/api/comms/call-signals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            callId: call.id,
-            clientSignalId,
-            type,
-            payload,
-          }),
-        })
+        diagnosticSignalsRef.current.postAttempts += 1
+
+        const response = await requestJson(
+          '/api/comms/call-signals',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callId: call.id,
+              clientSignalId,
+              type,
+              payload,
+            }),
+          },
+          null,
+          ({ status, ok }) => {
+            diagnosticSignalsRef.current.postLastStatus = status
+            if (ok) {
+              diagnosticSignalsRef.current.postLastSuccess = new Date().toISOString()
+            }
+          },
+        )
 
         if (!response.signal?.sequence) {
           throw new Error('The server did not return the canonical signal.')
         }
 
+        countDiagnosticSignal(diagnosticSignalsRef.current.sent, type, payload)
         return response.signal
       } catch (requestError) {
         lastError = requestError
@@ -624,14 +815,61 @@ export default function CommsPanel({
   }
 
   async function loadIceServers() {
+    diagnosticIceRef.current = {
+      status: 'REQUESTING',
+      httpStatus: null,
+      serverCount: 0,
+      hasStun: false,
+      hasTurn: false,
+      error: '',
+    }
+
     try {
-      const payload = await requestJson('/api/comms/ice-servers')
+      const payload = await requestJson(
+        '/api/comms/ice-servers',
+        {},
+        null,
+        ({ status }) => {
+          diagnosticIceRef.current.httpStatus = status
+        },
+      )
       if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0) {
         throw new Error('ICE server configuration was empty.')
+      }
+
+      let hasStun = false
+      let hasTurn = false
+      for (const server of payload.iceServers) {
+        const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls]
+        for (const url of urls) {
+          const value = typeof url === 'string' ? url.toLowerCase() : ''
+          if (value.startsWith('stun:') || value.startsWith('stuns:')) hasStun = true
+          if (value.startsWith('turn:') || value.startsWith('turns:')) hasTurn = true
+        }
+      }
+
+      diagnosticIceRef.current = {
+        status: 'SUCCESS',
+        httpStatus: diagnosticIceRef.current.httpStatus,
+        serverCount: payload.iceServers.length,
+        hasStun,
+        hasTurn,
+        error: '',
       }
       return payload.iceServers
     } catch (requestError) {
       if (requestError?.name === 'AbortError') throw requestError
+
+      diagnosticIceRef.current = {
+        status: 'FAILED',
+        httpStatus: diagnosticIceRef.current.httpStatus || requestError?.status || null,
+        serverCount: 0,
+        hasStun: false,
+        hasTurn: false,
+        error: requestError?.status
+          ? `HTTP ${requestError.status}`
+          : 'ICE server request failed',
+      }
 
       const configurationError = new Error('ICE server configuration failed.')
       configurationError.code = 'ICE_SERVER_CONFIG_FAILED'
@@ -937,6 +1175,12 @@ export default function CommsPanel({
   async function processRemoteSignal(call, signal) {
     if (!signal?.sequence || signal.senderAccountId === account?.id) return
 
+    countDiagnosticSignal(
+      diagnosticSignalsRef.current.received,
+      signal.type,
+      signal.payload,
+    )
+
     if (signal.type === 'offer') {
       remoteOfferRef.current = signal.payload
 
@@ -998,10 +1242,17 @@ export default function CommsPanel({
     const signals = []
 
     while (true) {
+      diagnosticSignalsRef.current.getAttempts += 1
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(callId)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
+        ({ status, ok }) => {
+          diagnosticSignalsRef.current.getLastStatus = status
+          if (ok) {
+            diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
+          }
+        },
       )
 
       const page = Array.isArray(payload.signals) ? payload.signals : []
@@ -1029,10 +1280,17 @@ export default function CommsPanel({
     let cursor = signalCursorRef.current
 
     while (true) {
+      diagnosticSignalsRef.current.getAttempts += 1
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(call.id)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
+        ({ status, ok }) => {
+          diagnosticSignalsRef.current.getLastStatus = status
+          if (ok) {
+            diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
+          }
+        },
       )
 
       const signals = Array.isArray(payload.signals) ? payload.signals : []
@@ -1757,8 +2015,11 @@ export default function CommsPanel({
       call?.status !== 'accepted' ||
       !signalPollingReady
     ) {
+      diagnosticPollingActiveRef.current = false
       return undefined
     }
+
+    diagnosticPollingActiveRef.current = true
 
     let timer = null
     let controller = null
@@ -1798,6 +2059,7 @@ export default function CommsPanel({
     timer = window.setInterval(pollSignals, cadence)
 
     return () => {
+      diagnosticPollingActiveRef.current = false
       if (timer) window.clearInterval(timer)
       controller?.abort()
       if (signalPollControllerRef.current === controller) {
@@ -1811,6 +2073,263 @@ export default function CommsPanel({
     signalPollingReady,
     mediaState,
   ])
+
+  useEffect(() => {
+    const call = currentCall
+    if (!account?.id || call?.status !== 'accepted') {
+      setConnectionDiagnostics(null)
+      return undefined
+    }
+
+    let timer = null
+    let cancelled = false
+    let inFlight = false
+
+    const refreshDiagnostics = async () => {
+      if (inFlight) return
+      inFlight = true
+
+      try {
+        const peer = peerConnectionRef.current
+        const localStream = localStreamRef.current
+        const remoteStream = remoteStreamRef.current
+        const remoteVideoStream = remoteVideoStreamRef.current
+
+        const micTrack = localStream?.getAudioTracks?.()[0] || null
+        const localVideoTrack = localStream?.getVideoTracks?.()[0] || null
+        const remoteAudioTrack = remoteStream?.getAudioTracks?.()[0] || null
+        const remoteVideoTrack = remoteVideoStream?.getVideoTracks?.()[0] || null
+
+        const audioSender = peer?.getTransceivers?.().find((transceiver) => (
+          transceiver.sender &&
+          (
+            transceiver.sender.track?.kind === 'audio' ||
+            transceiver.receiver?.track?.kind === 'audio'
+          )
+        ))?.sender || peer?.getSenders?.().find((sender) => sender.track?.kind === 'audio') || null
+        const videoSender = videoSenderRef.current
+
+        const localCandidateCounts = diagnosticCandidateCounts()
+        const remoteCandidateCounts = diagnosticCandidateCounts()
+        const rtp = {
+          outboundAudioBytes: 0,
+          inboundAudioBytes: 0,
+          outboundVideoBytes: 0,
+          inboundVideoBytes: 0,
+        }
+        let selectedPair = {
+          present: false,
+          localType: null,
+          remoteType: null,
+          state: null,
+          nominated: null,
+        }
+
+        if (peer?.getStats) {
+          try {
+            const stats = await peer.getStats()
+            const reports = new Map()
+
+            stats.forEach((report) => {
+              reports.set(report.id, report)
+
+              if (report.type === 'local-candidate') {
+                const candidateType = report.candidateType
+                if (candidateType in localCandidateCounts) {
+                  localCandidateCounts[candidateType] += 1
+                }
+              }
+
+              if (report.type === 'remote-candidate') {
+                const candidateType = report.candidateType
+                if (candidateType in remoteCandidateCounts) {
+                  remoteCandidateCounts[candidateType] += 1
+                }
+              }
+
+              const mediaKind = report.kind || report.mediaType
+              if (report.type === 'outbound-rtp' && !report.isRemote) {
+                if (mediaKind === 'audio') {
+                  rtp.outboundAudioBytes += Number(report.bytesSent || 0)
+                } else if (mediaKind === 'video') {
+                  rtp.outboundVideoBytes += Number(report.bytesSent || 0)
+                }
+              }
+
+              if (report.type === 'inbound-rtp' && !report.isRemote) {
+                if (mediaKind === 'audio') {
+                  rtp.inboundAudioBytes += Number(report.bytesReceived || 0)
+                } else if (mediaKind === 'video') {
+                  rtp.inboundVideoBytes += Number(report.bytesReceived || 0)
+                }
+              }
+            })
+
+            let pairReport = null
+            stats.forEach((report) => {
+              if (
+                report.type === 'transport' &&
+                report.selectedCandidatePairId &&
+                reports.has(report.selectedCandidatePairId)
+              ) {
+                pairReport = reports.get(report.selectedCandidatePairId)
+              }
+            })
+
+            if (!pairReport) {
+              stats.forEach((report) => {
+                if (
+                  !pairReport &&
+                  report.type === 'candidate-pair' &&
+                  report.state === 'succeeded' &&
+                  report.nominated
+                ) {
+                  pairReport = report
+                }
+              })
+            }
+
+            if (pairReport) {
+              const localCandidate = reports.get(pairReport.localCandidateId)
+              const remoteCandidate = reports.get(pairReport.remoteCandidateId)
+              selectedPair = {
+                present: true,
+                localType: localCandidate?.candidateType || null,
+                remoteType: remoteCandidate?.candidateType || null,
+                state: pairReport.state || null,
+                nominated: typeof pairReport.nominated === 'boolean'
+                  ? pairReport.nominated
+                  : null,
+              }
+            }
+          } catch {
+            // getStats() is read-only diagnostics; unavailable stats remain zero/unknown.
+          }
+        }
+
+        const ice = { ...diagnosticIceRef.current }
+        const signalDiagnostics = diagnosticSignalsRef.current
+        const signals = {
+          pollingActive: diagnosticPollingActiveRef.current,
+          getAttempts: signalDiagnostics.getAttempts,
+          getLastStatus: signalDiagnostics.getLastStatus,
+          getLastSuccess: signalDiagnostics.getLastSuccess,
+          postAttempts: signalDiagnostics.postAttempts,
+          postLastStatus: signalDiagnostics.postLastStatus,
+          postLastSuccess: signalDiagnostics.postLastSuccess,
+          sent: { ...signalDiagnostics.sent },
+          received: { ...signalDiagnostics.received },
+        }
+
+        const role = call.callerAccountId === account.id
+          ? 'CALLER'
+          : call.calleeAccountId === account.id
+            ? 'CALLEE'
+            : 'UNKNOWN'
+
+        let firstFailure = 'UNKNOWN'
+        if (ice.status === 'FAILED') {
+          firstFailure = 'ICE SERVER REQUEST FAILED'
+        } else if (localStream && !micTrack) {
+          firstFailure = 'NO LOCAL MICROPHONE TRACK'
+        } else if (
+          role === 'CALLER' &&
+          peer &&
+          ice.status === 'SUCCESS' &&
+          !peer.localDescription
+        ) {
+          firstFailure = 'NO OFFER CREATED'
+        } else if (
+          peer?.localDescription &&
+          !peer.remoteDescription &&
+          (signals.sent.offer > 0 || signals.received.offer > 0)
+        ) {
+          firstFailure = 'NO REMOTE DESCRIPTION'
+        } else if (
+          peer?.connectionState === 'failed' ||
+          peer?.iceConnectionState === 'failed'
+        ) {
+          firstFailure = 'ICE FAILED'
+        } else if (
+          (
+            peer?.connectionState === 'connecting' ||
+            peer?.iceConnectionState === 'checking'
+          ) &&
+          !selectedPair.present
+        ) {
+          firstFailure = 'ICE CHECKING — NO SELECTED PAIR'
+        } else if (
+          peer?.connectionState === 'connected' &&
+          rtp.inboundAudioBytes === 0
+        ) {
+          firstFailure = 'CONNECTED — NO INBOUND AUDIO'
+        }
+
+        const callId = String(call.id || '')
+        const safeCallId = callId.length > 14
+          ? `${callId.slice(0, 8)}…${callId.slice(-4)}`
+          : callId || 'UNKNOWN'
+
+        const snapshot = {
+          call: {
+            id: safeCallId,
+            role,
+            accepted: call.status === 'accepted',
+          },
+          media: {
+            mic: diagnosticTrackSnapshot(micTrack),
+            localVideo: diagnosticTrackSnapshot(localVideoTrack),
+            audioSender: {
+              present: Boolean(audioSender),
+              trackPresent: Boolean(audioSender?.track),
+              trackReadyState: audioSender?.track?.readyState || null,
+            },
+            videoSender: {
+              present: Boolean(videoSender),
+              trackPresent: Boolean(videoSender?.track),
+              trackReadyState: videoSender?.track?.readyState || null,
+            },
+            remoteStreamPresent: Boolean(remoteStream || remoteVideoStream),
+            remoteAudioCount: remoteStream?.getAudioTracks?.().length || 0,
+            remoteVideoCount: remoteVideoStream?.getVideoTracks?.().length || 0,
+            remoteAudio: diagnosticTrackSnapshot(remoteAudioTrack),
+            remoteVideo: diagnosticTrackSnapshot(remoteVideoTrack),
+          },
+          peer: {
+            signalingState: peer?.signalingState || 'MISSING',
+            connectionState: peer?.connectionState || 'MISSING',
+            iceConnectionState: peer?.iceConnectionState || 'MISSING',
+            iceGatheringState: peer?.iceGatheringState || 'MISSING',
+            localDescriptionPresent: Boolean(peer?.localDescription),
+            localDescriptionType: peer?.localDescription?.type || null,
+            remoteDescriptionPresent: Boolean(peer?.remoteDescription),
+            remoteDescriptionType: peer?.remoteDescription?.type || null,
+          },
+          ice,
+          signals,
+          candidates: {
+            local: localCandidateCounts,
+            remote: remoteCandidateCounts,
+          },
+          selectedPair,
+          rtp,
+          firstFailure,
+        }
+
+        if (!cancelled) setConnectionDiagnostics(snapshot)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    refreshDiagnostics()
+    timer = window.setInterval(refreshDiagnostics, 1000)
+
+    return () => {
+      cancelled = true
+      if (timer) window.clearInterval(timer)
+    }
+  }, [account?.id, currentCall?.id, currentCall?.status])
 
   useEffect(() => () => {
     if (terminalCallTimerRef.current) {
@@ -2347,6 +2866,25 @@ export default function CommsPanel({
                 >
                   {callBusy ? 'WORKING…' : 'END CALL'}
                 </button>
+              </div>
+
+              <div className="comms-connection-diagnostics">
+                <div className="comms-connection-diagnostics-head">
+                  <strong>RUNTIME CONNECTION DIAGNOSTICS</strong>
+                  <button
+                    type="button"
+                    disabled={!connectionDiagnostics}
+                    onClick={() => {
+                      if (!connectionDiagnostics || !navigator.clipboard?.writeText) return
+                      navigator.clipboard
+                        .writeText(diagnosticSnapshotText(connectionDiagnostics))
+                        .catch(() => {})
+                    }}
+                  >
+                    COPY DIAGNOSTICS
+                  </button>
+                </div>
+                <pre>{diagnosticSnapshotText(connectionDiagnostics)}</pre>
               </div>
             </>
           )}
