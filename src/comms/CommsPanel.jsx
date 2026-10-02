@@ -376,6 +376,7 @@ export default function CommsPanel({
   const remoteOfferRef = useRef(null)
   const remoteAnswerRef = useRef(null)
   const mediaSetupPromiseRef = useRef(null)
+  const mediaLifecycleGenerationRef = useRef(0)
   const signalSendChainRef = useRef(Promise.resolve())
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
@@ -753,8 +754,35 @@ export default function CommsPanel({
     }
   }
 
+  function callUpdatedAtMillis(call) {
+    if (!call?.updatedAt) return null
+    const value = Date.parse(call.updatedAt)
+    return Number.isFinite(value) ? value : null
+  }
+
+  function mediaLifecycleIsCurrent(generation, call, peer = null) {
+    if (mediaLifecycleGenerationRef.current !== generation) return false
+    if (currentCallRef.current?.id !== call?.id) return false
+    if (currentCallRef.current?.status !== 'accepted') return false
+    if (peer && peerConnectionRef.current !== peer) return false
+    return true
+  }
+
   function setCanonicalCall(call) {
     const previousCall = currentCallRef.current
+
+    if (call && previousCall?.id === call.id) {
+      const incomingUpdatedAt = callUpdatedAtMillis(call)
+      const currentUpdatedAt = callUpdatedAtMillis(previousCall)
+
+      if (
+        incomingUpdatedAt !== null &&
+        currentUpdatedAt !== null &&
+        incomingUpdatedAt < currentUpdatedAt
+      ) {
+        return
+      }
+    }
 
     if (
       mediaCallIdRef.current &&
@@ -808,6 +836,7 @@ export default function CommsPanel({
   }
 
   function cleanupMediaSession({ resetState = true } = {}) {
+    mediaLifecycleGenerationRef.current += 1
     mediaBootstrapControllerRef.current?.abort()
     signalPollControllerRef.current?.abort()
     mediaBootstrapControllerRef.current = null
@@ -1312,30 +1341,43 @@ export default function CommsPanel({
   async function beginCallerMedia(call) {
     if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
 
+    const generation = mediaLifecycleGenerationRef.current
+
     mediaSetupPromiseRef.current = (async () => {
       const stream = await acquireLocalMedia(call)
-      if (!stream) return false
+      if (!stream || !mediaLifecycleIsCurrent(generation, call)) return false
 
       try {
         const peer = await createPeerConnectionForCall(call, stream)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         const offer = await peer.createOffer()
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         await peer.setLocalDescription(offer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         await postSignalWithRetry(call, 'offer', {
           type: peer.localDescription.type,
           sdp: peer.localDescription.sdp,
         })
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         localSdpStoredRef.current = true
         await flushLocalCandidates(call)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         setMediaState('connecting')
         return true
       } catch (requestError) {
+        if (!mediaLifecycleIsCurrent(generation, call)) return false
         markSignalingFailure(requestError)
         return false
       }
     })().finally(() => {
-      mediaSetupPromiseRef.current = null
+      if (mediaLifecycleGenerationRef.current === generation) {
+        mediaSetupPromiseRef.current = null
+      }
     })
 
     return mediaSetupPromiseRef.current
@@ -1346,13 +1388,18 @@ export default function CommsPanel({
 
     if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
 
+    const generation = mediaLifecycleGenerationRef.current
+
     mediaSetupPromiseRef.current = (async () => {
       const stream = await acquireLocalMedia(call)
-      if (!stream) return false
+      if (!stream || !mediaLifecycleIsCurrent(generation, call)) return false
 
       try {
         const peer = await createPeerConnectionForCall(call, stream)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         await peer.setRemoteDescription(offerPayload)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         if (call.kind === 'audio') {
           const videoTransceiver = peer.getTransceivers().find(
@@ -1366,25 +1413,35 @@ export default function CommsPanel({
         }
 
         await flushRemoteCandidates()
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         const answer = await peer.createAnswer()
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         await peer.setLocalDescription(answer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         await postSignalWithRetry(call, 'answer', {
           type: peer.localDescription.type,
           sdp: peer.localDescription.sdp,
         })
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         localSdpStoredRef.current = true
         await flushLocalCandidates(call)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
         setMediaState('connecting')
         return true
       } catch (requestError) {
+        if (!mediaLifecycleIsCurrent(generation, call)) return false
         markSignalingFailure(requestError)
         return false
       }
     })().finally(() => {
-      mediaSetupPromiseRef.current = null
+      if (mediaLifecycleGenerationRef.current === generation) {
+        mediaSetupPromiseRef.current = null
+      }
     })
 
     return mediaSetupPromiseRef.current
