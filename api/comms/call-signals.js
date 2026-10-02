@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   currentAccount,
   databaseNotConfigured,
@@ -28,6 +29,57 @@ function queryValue(value) {
 
 function conflict(res, code, error) {
   return res.status(409).json({ code, error })
+}
+
+function diagnosticHash(value) {
+  if (typeof value !== 'string' || !value) return ''
+  return createHash('sha256').update(value).digest('hex').slice(0, 16)
+}
+
+function diagnosticRuntime() {
+  const deploymentSource =
+    process.env.VERCEL_DEPLOYMENT_ID ||
+    process.env.VERCEL_URL ||
+    ''
+
+  return {
+    dbHash: diagnosticHash(process.env.DATABASE_URL || ''),
+    deploySha: typeof process.env.VERCEL_GIT_COMMIT_SHA === 'string'
+      ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 12)
+      : '',
+    deployHash: diagnosticHash(deploymentSource),
+    region: typeof process.env.VERCEL_REGION === 'string'
+      ? process.env.VERCEL_REGION.slice(0, 24)
+      : '',
+  }
+}
+
+function setDiagnosticProvenanceHeaders(
+  res,
+  {
+    callId,
+    accountId,
+    serverTime = new Date().toISOString(),
+    signalType = '',
+    signalSequence = '',
+  },
+) {
+  const runtime = diagnosticRuntime()
+  const headers = {
+    'X-WC-Diag-Call-Hash': diagnosticHash(callId),
+    'X-WC-Diag-Account-Hash': diagnosticHash(accountId),
+    'X-WC-Diag-Db-Hash': runtime.dbHash,
+    'X-WC-Diag-Deploy-Sha': runtime.deploySha,
+    'X-WC-Diag-Deploy-Hash': runtime.deployHash,
+    'X-WC-Diag-Region': runtime.region,
+    'X-WC-Diag-Server-Time': serverTime,
+    'X-WC-Diag-Signal-Type': signalType,
+    'X-WC-Diag-Signal-Sequence': String(signalSequence || ''),
+  }
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (value) res.setHeader(name, value)
+  }
 }
 
 export default async function handler(req, res) {
@@ -62,6 +114,12 @@ export default async function handler(req, res) {
           accountId: account.id,
           callId,
           after,
+        })
+
+        setDiagnosticProvenanceHeaders(res, {
+          callId,
+          accountId: account.id,
+          serverTime: new Date().toISOString(),
         })
 
         return res.status(200).json(result)
@@ -108,6 +166,14 @@ export default async function handler(req, res) {
         clientSignalId,
         type,
         payload: body.payload,
+      })
+
+      setDiagnosticProvenanceHeaders(res, {
+        callId,
+        accountId: account.id,
+        serverTime: new Date().toISOString(),
+        signalType: result.signal?.type || type,
+        signalSequence: result.signal?.sequence || '',
       })
 
       return res
