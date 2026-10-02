@@ -1,6 +1,8 @@
 import { currentAccount } from '../../lib/auth-db.js'
 
 const TWILIO_TOKEN_TTL_SECONDS = 3600
+const TWILIO_FETCH_TIMEOUT_MS = 8000
+const TWILIO_FETCH_ATTEMPTS = 2
 
 function iceServerList(value) {
   if (!Array.isArray(value)) return []
@@ -23,6 +25,51 @@ function iceServerList(value) {
 
     return [result]
   })
+}
+
+async function fetchTwilioToken(url, options) {
+  let lastFailure = null
+
+  for (let attempt = 0; attempt < TWILIO_FETCH_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController()
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, TWILIO_FETCH_TIMEOUT_MS)
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      })
+
+      if (response.ok) {
+        return { response, timedOut: false }
+      }
+
+      const retryable = response.status === 429 || response.status >= 500
+      if (!retryable || attempt === TWILIO_FETCH_ATTEMPTS - 1) {
+        return { response, timedOut: false }
+      }
+
+      lastFailure = { response, timedOut: false }
+    } catch (error) {
+      if (timedOut) {
+        lastFailure = { response: null, timedOut: true }
+      } else {
+        lastFailure = { response: null, timedOut: false, error }
+      }
+
+      if (attempt === TWILIO_FETCH_ATTEMPTS - 1) {
+        return lastFailure
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  return lastFailure || { response: null, timedOut: false }
 }
 
 export default async function handler(req, res) {
@@ -52,7 +99,7 @@ export default async function handler(req, res) {
       .from(`${apiKey}:${apiSecret}`, 'utf8')
       .toString('base64')
 
-    const response = await fetch(
+    const twilioResult = await fetchTwilioToken(
       `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Tokens.json`,
       {
         method: 'POST',
@@ -66,9 +113,15 @@ export default async function handler(req, res) {
       },
     )
 
-    if (!response.ok) {
+    if (twilioResult.timedOut) {
+      console.error('COMMS ICE credential request timed out.')
+      return res.status(504).json({ error: 'ICE credential request timed out.' })
+    }
+
+    const response = twilioResult.response
+    if (!response?.ok) {
       console.error('COMMS ICE credential request failed', {
-        status: response.status,
+        status: response?.status || null,
       })
       return res.status(502).json({ error: 'ICE credentials could not be obtained.' })
     }
