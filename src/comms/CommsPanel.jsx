@@ -1073,20 +1073,24 @@ export default function CommsPanel({
 
     const requestController = new AbortController()
     const lifecycleSignal = mediaBootstrapControllerRef.current?.signal || null
-    let timedOut = false
+    let abortReason = ''
 
     const handleLifecycleAbort = () => {
+      if (requestController.signal.aborted) return
+      abortReason = 'lifecycle'
       requestController.abort()
     }
 
     if (lifecycleSignal?.aborted) {
+      abortReason = 'lifecycle'
       requestController.abort()
     } else {
       lifecycleSignal?.addEventListener('abort', handleLifecycleAbort, { once: true })
     }
 
     const timeout = window.setTimeout(() => {
-      timedOut = true
+      if (requestController.signal.aborted) return
+      abortReason = 'timeout'
       requestController.abort()
     }, 20000)
 
@@ -1124,7 +1128,9 @@ export default function CommsPanel({
       }
       return payload.iceServers
     } catch (requestError) {
-      if (requestError?.name === 'AbortError' && !timedOut) throw requestError
+      if (requestError?.name === 'AbortError' && abortReason !== 'timeout') {
+        throw requestError
+      }
 
       diagnosticIceRef.current = {
         status: 'FAILED',
