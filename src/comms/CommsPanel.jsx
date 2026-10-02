@@ -238,6 +238,8 @@ function diagnosticSnapshotText(snapshot) {
   const sent = snapshot.signals.sent
   const received = snapshot.signals.received
   const deliveryBatches = snapshot.signalDelivery?.batches || []
+  const deliveryPosts = snapshot.signalDelivery?.posts || []
+  const provenance = snapshot.signalDelivery?.provenance || {}
 
   return [
     'RUNTIME CONNECTION DIAGNOSTICS',
@@ -278,13 +280,26 @@ function diagnosticSnapshotText(snapshot) {
     `OUTBOUND VIDEO: bytesSent=${snapshot.rtp.outboundVideoBytes}`,
     `INBOUND VIDEO: bytesReceived=${snapshot.rtp.inboundVideoBytes}`,
     '',
+    'REQUEST PROVENANCE',
+    `CALL HASH: ${provenance.callHash || 'N/A'}`,
+    `ACCOUNT HASH: ${provenance.accountHash || 'N/A'}`,
+    `DB HASH: ${provenance.dbHash || 'N/A'}`,
+    `DEPLOY SHA: ${provenance.deploySha || 'N/A'}`,
+    `DEPLOY HASH: ${provenance.deployHash || 'N/A'}`,
+    `REGION: ${provenance.region || 'N/A'}`,
+    '',
     'SIGNAL DELIVERY BOUNDARY',
     `GET RESPONSES OBSERVED: ${deliveryBatches.length}`,
     ...deliveryBatches.flatMap((batch, index) => [
       `GET #${index + 1}: call=${batch.callId} // after=${batch.after} // HTTP=${batch.httpStatus} // rows=${batch.rowCount} // nextAfter=${batch.nextAfter} // hasMore=${batch.hasMore ? 'YES' : 'NO'}`,
+      `GET PROVENANCE: server=${batch.provenance.serverTime || 'N/A'} // callHash=${batch.provenance.callHash || 'N/A'} // accountHash=${batch.provenance.accountHash || 'N/A'} // dbHash=${batch.provenance.dbHash || 'N/A'} // deploySha=${batch.provenance.deploySha || 'N/A'} // deployHash=${batch.provenance.deployHash || 'N/A'} // region=${batch.provenance.region || 'N/A'}`,
       `RETURNED: offer=${batch.returned.offer} // answer=${batch.returned.answer} // ice=${batch.returned.ice} // remote=${batch.remoteCount} // self=${batch.selfCount} // seq=${batch.lowestSequence || 'NONE'}..${batch.highestSequence || 'NONE'}`,
       `PROCESSING: presented=${batch.processing.presented} // processed=${batch.processing.processed} // skippedSelf=${batch.processing.skippedSelf} // skippedOther=${batch.processing.skippedOther} // offerPresented=${batch.processing.offerPresented} // offerProcessed=${batch.processing.offerProcessed} // icePresented=${batch.processing.icePresented} // iceProcessed=${batch.processing.iceProcessed} // cursorBefore=${batch.processing.cursorBefore ?? 'N/A'} // cursorAfter=${batch.processing.cursorAfter ?? 'N/A'}`,
     ]),
+    `POST RESPONSES OBSERVED: ${deliveryPosts.length}`,
+    ...deliveryPosts.map((post, index) => (
+      `POST #${index + 1}: type=${post.type || 'UNKNOWN'} // seq=${post.sequence || 'N/A'} // HTTP=${post.httpStatus ?? 'N/A'} // server=${post.provenance.serverTime || 'N/A'} // callHash=${post.provenance.callHash || 'N/A'} // accountHash=${post.provenance.accountHash || 'N/A'} // dbHash=${post.provenance.dbHash || 'N/A'} // deploySha=${post.provenance.deploySha || 'N/A'} // deployHash=${post.provenance.deployHash || 'N/A'} // region=${post.provenance.region || 'N/A'}`
+    )),
     '',
     `FIRST OBSERVED FAILURE: ${snapshot.firstFailure}`,
   ].join('\n')
@@ -387,7 +402,9 @@ export default function CommsPanel({
   const diagnosticPollingActiveRef = useRef(false)
   const diagnosticSignalDeliveryRef = useRef({
     batches: [],
+    posts: [],
     sequenceToBatch: new Map(),
+    provenance: null,
   })
 
   function resetConnectionDiagnostics(callId = null) {
@@ -413,9 +430,27 @@ export default function CommsPanel({
     diagnosticPollingActiveRef.current = false
     diagnosticSignalDeliveryRef.current = {
       batches: [],
+      posts: [],
       sequenceToBatch: new Map(),
+      provenance: null,
     }
     setConnectionDiagnostics(null)
+  }
+
+  function diagnosticProvenanceFromHeaders(headers) {
+    const get = (name) => headers?.get?.(name) || ''
+
+    return {
+      callHash: get('X-WC-Diag-Call-Hash'),
+      accountHash: get('X-WC-Diag-Account-Hash'),
+      dbHash: get('X-WC-Diag-Db-Hash'),
+      deploySha: get('X-WC-Diag-Deploy-Sha'),
+      deployHash: get('X-WC-Diag-Deploy-Hash'),
+      region: get('X-WC-Diag-Region'),
+      serverTime: get('X-WC-Diag-Server-Time'),
+      signalType: get('X-WC-Diag-Signal-Type'),
+      signalSequence: get('X-WC-Diag-Signal-Sequence'),
+    }
   }
 
   function truncateDiagnosticId(value) {
@@ -452,6 +487,7 @@ export default function CommsPanel({
     httpStatus,
     payload,
     cursorBefore,
+    provenance,
   }) {
     const signals = Array.isArray(payload?.signals) ? payload.signals : []
     const returned = signalTypeCounts(signals)
@@ -496,6 +532,7 @@ export default function CommsPanel({
       selfCount,
       lowestSequence,
       highestSequence,
+      provenance: provenance || {},
       processing: {
         presented: 0,
         processed: 0,
@@ -511,6 +548,7 @@ export default function CommsPanel({
     }
 
     const delivery = diagnosticSignalDeliveryRef.current
+    if (provenance?.callHash) delivery.provenance = { ...provenance }
     const batchIndex = delivery.batches.push(batch) - 1
 
     for (const signal of signals) {
@@ -520,6 +558,22 @@ export default function CommsPanel({
     }
 
     return batchIndex
+  }
+
+  function recordSignalPostDiagnostic({
+    type,
+    sequence,
+    httpStatus,
+    provenance,
+  }) {
+    const delivery = diagnosticSignalDeliveryRef.current
+    if (provenance?.callHash) delivery.provenance = { ...provenance }
+    delivery.posts.push({
+      type: provenance?.signalType || type || '',
+      sequence: provenance?.signalSequence || String(sequence || ''),
+      httpStatus,
+      provenance: provenance || {},
+    })
   }
 
   function recordSignalProcessingDiagnostic(signal, cursorBefore, cursorAfter) {
@@ -677,6 +731,7 @@ export default function CommsPanel({
         diagnosticResponseObserver?.({
           status: response.status,
           ok: response.ok,
+          provenance: diagnosticProvenanceFromHeaders(response.headers),
         })
       } catch {
         // Diagnostic observation must never affect request behavior.
@@ -905,6 +960,8 @@ export default function CommsPanel({
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         diagnosticSignalsRef.current.postAttempts += 1
+        let responseStatus = null
+        let responseProvenance = null
 
         const response = await requestJson(
           '/api/comms/call-signals',
@@ -919,7 +976,9 @@ export default function CommsPanel({
             }),
           },
           null,
-          ({ status, ok }) => {
+          ({ status, ok, provenance }) => {
+            responseStatus = status
+            responseProvenance = provenance
             diagnosticSignalsRef.current.postLastStatus = status
             if (ok) {
               diagnosticSignalsRef.current.postLastSuccess = new Date().toISOString()
@@ -931,6 +990,12 @@ export default function CommsPanel({
           throw new Error('The server did not return the canonical signal.')
         }
 
+        recordSignalPostDiagnostic({
+          type,
+          sequence: response.signal.sequence,
+          httpStatus: responseStatus,
+          provenance: responseProvenance,
+        })
         countDiagnosticSignal(diagnosticSignalsRef.current.sent, type, payload)
         return response.signal
       } catch (requestError) {
@@ -1404,12 +1469,14 @@ export default function CommsPanel({
       diagnosticSignalsRef.current.getAttempts += 1
       const requestedAfter = cursor
       let responseStatus = null
+      let responseProvenance = null
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(callId)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
-        ({ status, ok }) => {
+        ({ status, ok, provenance }) => {
           responseStatus = status
+          responseProvenance = provenance
           diagnosticSignalsRef.current.getLastStatus = status
           if (ok) {
             diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
@@ -1423,6 +1490,7 @@ export default function CommsPanel({
         httpStatus: responseStatus,
         payload,
         cursorBefore: requestedAfter,
+        provenance: responseProvenance,
       })
 
       const page = Array.isArray(payload.signals) ? payload.signals : []
@@ -1453,12 +1521,14 @@ export default function CommsPanel({
       diagnosticSignalsRef.current.getAttempts += 1
       const requestedAfter = cursor
       let responseStatus = null
+      let responseProvenance = null
       const payload = await requestJson(
         `/api/comms/call-signals?callId=${encodeURIComponent(call.id)}&after=${encodeURIComponent(cursor)}`,
         {},
         controller,
-        ({ status, ok }) => {
+        ({ status, ok, provenance }) => {
           responseStatus = status
+          responseProvenance = provenance
           diagnosticSignalsRef.current.getLastStatus = status
           if (ok) {
             diagnosticSignalsRef.current.getLastSuccess = new Date().toISOString()
@@ -1472,6 +1542,7 @@ export default function CommsPanel({
         httpStatus: responseStatus,
         payload,
         cursorBefore: requestedAfter,
+        provenance: responseProvenance,
       })
 
       const signals = Array.isArray(payload.signals) ? payload.signals : []
@@ -2457,10 +2528,18 @@ export default function CommsPanel({
           : callId || 'UNKNOWN'
 
         const deliverySnapshot = {
+          provenance: diagnosticSignalDeliveryRef.current.provenance
+            ? { ...diagnosticSignalDeliveryRef.current.provenance }
+            : null,
           batches: diagnosticSignalDeliveryRef.current.batches.map((batch) => ({
             ...batch,
+            provenance: { ...batch.provenance },
             returned: { ...batch.returned },
             processing: { ...batch.processing },
+          })),
+          posts: diagnosticSignalDeliveryRef.current.posts.map((post) => ({
+            ...post,
+            provenance: { ...post.provenance },
           })),
         }
 
