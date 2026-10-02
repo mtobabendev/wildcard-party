@@ -1071,11 +1071,30 @@ export default function CommsPanel({
       error: '',
     }
 
+    const requestController = new AbortController()
+    const lifecycleSignal = mediaBootstrapControllerRef.current?.signal || null
+    let timedOut = false
+
+    const handleLifecycleAbort = () => {
+      requestController.abort()
+    }
+
+    if (lifecycleSignal?.aborted) {
+      requestController.abort()
+    } else {
+      lifecycleSignal?.addEventListener('abort', handleLifecycleAbort, { once: true })
+    }
+
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      requestController.abort()
+    }, 20000)
+
     try {
       const payload = await requestJson(
         '/api/comms/ice-servers',
         {},
-        null,
+        requestController,
         ({ status }) => {
           diagnosticIceRef.current.httpStatus = status
         },
@@ -1105,7 +1124,7 @@ export default function CommsPanel({
       }
       return payload.iceServers
     } catch (requestError) {
-      if (requestError?.name === 'AbortError') throw requestError
+      if (requestError?.name === 'AbortError' && !timedOut) throw requestError
 
       diagnosticIceRef.current = {
         status: 'FAILED',
@@ -1121,6 +1140,9 @@ export default function CommsPanel({
       const configurationError = new Error('ICE server configuration failed.')
       configurationError.code = 'ICE_SERVER_CONFIG_FAILED'
       throw configurationError
+    } finally {
+      window.clearTimeout(timeout)
+      lifecycleSignal?.removeEventListener('abort', handleLifecycleAbort)
     }
   }
 
