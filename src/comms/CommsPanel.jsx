@@ -1814,6 +1814,8 @@ export default function CommsPanel({
 
       const controller = mediaBootstrapControllerRef.current
 
+      let retry = false
+
       signalTicketRefreshPromiseRef.current = (async () => {
         const ticketPayload = await requestSignalTicket(call, controller)
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return
@@ -1829,14 +1831,15 @@ export default function CommsPanel({
 
         await startNativeSignalNegotiation(call, peer, socket, generation)
       })().catch((requestError) => {
-        if (
+        retry = Boolean(
           requestError?.name !== 'AbortError' &&
           mediaLifecycleIsCurrent(generation, call, peer)
-        ) {
-          scheduleSignalReconnect(call, peer, generation)
-        }
+        )
       }).finally(() => {
         signalTicketRefreshPromiseRef.current = null
+        if (retry) {
+          scheduleSignalReconnect(call, peer, generation)
+        }
       })
     }, delay)
   }
@@ -2025,6 +2028,19 @@ export default function CommsPanel({
         )
       } catch (requestError) {
         if (!mediaLifecycleIsCurrent(generation, call)) return false
+
+        if (
+          requestError?.code === 'SIGNAL_SOCKET_FAILED' ||
+          requestError?.code === 'SIGNAL_SOCKET_TIMEOUT'
+        ) {
+          const peer = peerConnectionRef.current
+          if (peer && mediaLifecycleIsCurrent(generation, call, peer)) {
+            scheduleSignalReconnect(call, peer, generation)
+            setMediaState('connecting')
+            return true
+          }
+        }
+
         markSignalingFailure(requestError)
         return false
       }
