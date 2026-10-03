@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { io } from 'socket.io-client'
 import './comms.css'
 
 const MAX_ATTACHMENT_BYTES = 10485760
@@ -379,6 +380,10 @@ export default function CommsPanel({
   const mediaLifecycleGenerationRef = useRef(0)
   const signalSendChainRef = useRef(Promise.resolve())
   const sessionPollingStartedAtRef = useRef(0)
+  const signalSocketRef = useRef(null)
+  const signalPeerReadyRef = useRef(false)
+  const signalTicketRefreshPromiseRef = useRef(null)
+  const socketRemoteCandidatesRef = useRef([])
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
@@ -887,6 +892,16 @@ export default function CommsPanel({
     signalSendChainRef.current = Promise.resolve()
     sessionPollingStartedAtRef.current = 0
 
+    const signalSocket = signalSocketRef.current
+    if (signalSocket) {
+      signalSocket.removeAllListeners()
+      signalSocket.disconnect()
+    }
+    signalSocketRef.current = null
+    signalPeerReadyRef.current = false
+    signalTicketRefreshPromiseRef.current = null
+    socketRemoteCandidatesRef.current = []
+
     if (resetState) {
       setSignalPollingReady(false)
       setMediaState('idle')
@@ -1360,7 +1375,10 @@ export default function CommsPanel({
   async function createPeerConnectionForCall(
     call,
     localStream,
-    { trickleIce = true } = {},
+    {
+      trickleIce = true,
+      onIceCandidate = null,
+    } = {},
   ) {
     if (
       peerConnectionRef.current &&
@@ -1389,7 +1407,12 @@ export default function CommsPanel({
     remoteStreamRef.current = remoteStream
     remoteVideoStreamRef.current = remoteVideoStream
 
-    if (trickleIce) {
+    if (typeof onIceCandidate === 'function') {
+      peer.onicecandidate = (event) => {
+        if (!event.candidate) return
+        onIceCandidate(event.candidate.toJSON())
+      }
+    } else if (trickleIce) {
       peer.onicecandidate = (event) => {
         if (!event.candidate) return
 
@@ -1475,6 +1498,385 @@ export default function CommsPanel({
     setMediaState('connecting')
     setMediaRevision((value) => value + 1)
     return peer
+  }
+
+  async function requestSignalTicket(call, controller = null) {
+    const requestController = new AbortController()
+    const parentSignal = controller?.signal || null
+    let abortReason = ''
+
+    const handleParentAbort = () => {
+      if (requestController.signal.aborted) return
+      abortReason = 'lifecycle'
+      requestController.abort()
+    }
+
+    if (parentSignal?.aborted) {
+      abortReason = 'lifecycle'
+      requestController.abort()
+    } else {
+      parentSignal?.addEventListener('abort', handleParentAbort, { once: true })
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (requestController.signal.aborted) return
+      abortReason = 'timeout'
+      requestController.abort()
+    }, 10000)
+
+    try {
+      return await requestJson(
+        '/api/comms/signal-ticket',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callId: call.id }),
+        },
+        requestController,
+      )
+    } catch (requestError) {
+      if (requestError?.name === 'AbortError' && abortReason === 'timeout') {
+        const timeoutError = new Error('Realtime signaling ticket timed out.')
+        timeoutError.code = 'SIGNAL_TICKET_TIMEOUT'
+        throw timeoutError
+      }
+      throw requestError
+    } finally {
+      window.clearTimeout(timeout)
+      parentSignal?.removeEventListener('abort', handleParentAbort)
+    }
+  }
+
+  function waitForSignalSocketConnect(socket, signal, timeoutMs = 10000) {
+    if (socket.connected) return Promise.resolve()
+
+    return new Promise((resolve, reject) => {
+      let timeout = null
+      let settled = false
+
+      const cleanup = () => {
+        socket.off('connect', handleConnect)
+        signal?.removeEventListener('abort', handleAbort)
+        if (timeout) window.clearTimeout(timeout)
+      }
+
+      const finish = (callback) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback()
+      }
+
+      const handleConnect = () => finish(resolve)
+      const handleAbort = () => {
+        const abortError = new Error('Media lifecycle changed during signaling connection.')
+        abortError.name = 'AbortError'
+        finish(() => reject(abortError))
+      }
+
+      socket.on('connect', handleConnect)
+
+      if (signal?.aborted) {
+        handleAbort()
+        return
+      }
+
+      signal?.addEventListener('abort', handleAbort, { once: true })
+      timeout = window.setTimeout(() => {
+        const timeoutError = new Error('Realtime signaling connection timed out.')
+        timeoutError.code = 'SIGNAL_SOCKET_TIMEOUT'
+        finish(() => reject(timeoutError))
+      }, timeoutMs)
+    })
+  }
+
+  function waitForSignalPeerReady(socket, signal, timeoutMs = 20000) {
+    if (signalPeerReadyRef.current) return Promise.resolve()
+
+    return new Promise((resolve, reject) => {
+      let timeout = null
+      let settled = false
+
+      const cleanup = () => {
+        socket.off('peer-ready', handleReady)
+        signal?.removeEventListener('abort', handleAbort)
+        if (timeout) window.clearTimeout(timeout)
+      }
+
+      const finish = (callback) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback()
+      }
+
+      const handleReady = () => {
+        signalPeerReadyRef.current = true
+        finish(resolve)
+      }
+
+      const handleAbort = () => {
+        const abortError = new Error('Media lifecycle changed while waiting for peer.')
+        abortError.name = 'AbortError'
+        finish(() => reject(abortError))
+      }
+
+      socket.on('peer-ready', handleReady)
+
+      if (signal?.aborted) {
+        handleAbort()
+        return
+      }
+
+      signal?.addEventListener('abort', handleAbort, { once: true })
+      timeout = window.setTimeout(() => {
+        const timeoutError = new Error('Realtime signaling peer did not become ready.')
+        timeoutError.code = 'SIGNAL_PEER_TIMEOUT'
+        finish(() => reject(timeoutError))
+      }, timeoutMs)
+    })
+  }
+
+  async function flushSocketRemoteCandidates(peer, generation, call) {
+    if (!peer?.remoteDescription) return
+
+    const queued = socketRemoteCandidatesRef.current
+    socketRemoteCandidatesRef.current = []
+
+    for (const candidate of queued) {
+      if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+      await peer.addIceCandidate(candidate)
+    }
+  }
+
+  async function applySocketRemoteCandidate(call, peer, generation, candidate) {
+    if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+    if (!peer.remoteDescription) {
+      socketRemoteCandidatesRef.current.push(candidate)
+      return
+    }
+
+    await peer.addIceCandidate(candidate)
+  }
+
+  async function refreshSignalSocketTicket(call, socket, generation) {
+    if (signalTicketRefreshPromiseRef.current) {
+      return signalTicketRefreshPromiseRef.current
+    }
+
+    const controller = mediaBootstrapControllerRef.current
+
+    signalTicketRefreshPromiseRef.current = (async () => {
+      const payload = await requestSignalTicket(call, controller)
+      if (
+        !mediaLifecycleIsCurrent(generation, call) ||
+        signalSocketRef.current !== socket
+      ) {
+        return
+      }
+
+      socket.auth = { ticket: payload.ticket }
+      socket.connect()
+    })().catch((requestError) => {
+      if (
+        requestError?.name !== 'AbortError' &&
+        mediaLifecycleIsCurrent(generation, call)
+      ) {
+        setMediaState('failed')
+        setMediaError('MEDIA SIGNALING FAILED')
+      }
+    }).finally(() => {
+      signalTicketRefreshPromiseRef.current = null
+    })
+
+    return signalTicketRefreshPromiseRef.current
+  }
+
+  function installSignalSocketHandlers(call, peer, socket, generation) {
+    const caller = call.callerAccountId === account?.id
+
+    socket.on('peer-ready', () => {
+      signalPeerReadyRef.current = true
+    })
+
+    socket.on('ice-candidate', async (candidate) => {
+      try {
+        await applySocketRemoteCandidate(call, peer, generation, candidate)
+      } catch {
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+        setMediaState('failed')
+        setMediaError('MEDIA CANDIDATE FAILED')
+      }
+    })
+
+    socket.on('offer', async (offer) => {
+      if (
+        caller ||
+        remoteOfferRef.current ||
+        !mediaLifecycleIsCurrent(generation, call, peer)
+      ) {
+        return
+      }
+
+      try {
+        remoteOfferRef.current = offer
+        await peer.setRemoteDescription(offer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        await flushSocketRemoteCandidates(peer, generation, call)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        if (call.kind === 'audio') {
+          const videoTransceiver = peer.getTransceivers().find(
+            (transceiver) => transceiver.receiver?.track?.kind === 'video',
+          )
+          if (videoTransceiver) {
+            videoTransceiver.direction = 'sendrecv'
+            videoSenderRef.current = videoTransceiver.sender
+            setVideoReady(true)
+          }
+        }
+
+        const answer = await peer.createAnswer()
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        await peer.setLocalDescription(answer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        socket.emit('answer', {
+          type: peer.localDescription.type,
+          sdp: peer.localDescription.sdp,
+        })
+        setMediaState('connecting')
+      } catch {
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+        setMediaState('failed')
+        setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
+      }
+    })
+
+    socket.on('answer', async (answer) => {
+      if (
+        !caller ||
+        remoteAnswerRef.current ||
+        !mediaLifecycleIsCurrent(generation, call, peer)
+      ) {
+        return
+      }
+
+      try {
+        await peer.setRemoteDescription(answer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        remoteAnswerRef.current = answer
+        await flushSocketRemoteCandidates(peer, generation, call)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        setMediaState('connecting')
+      } catch {
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+        setMediaState('failed')
+        setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
+      }
+    })
+
+    socket.on('call-end', () => {
+      if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+      cleanupMediaSession()
+    })
+
+    socket.on('connect_error', (error) => {
+      if (
+        error?.data?.code === 'SIGNAL_TICKET_EXPIRED' &&
+        mediaLifecycleIsCurrent(generation, call, peer)
+      ) {
+        refreshSignalSocketTicket(call, socket, generation)
+      }
+    })
+  }
+
+  async function beginDirectSocketMedia(call, controller) {
+    if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
+
+    const generation = mediaLifecycleGenerationRef.current
+
+    mediaSetupPromiseRef.current = (async () => {
+      const [stream, ticketPayload] = await Promise.all([
+        acquireLocalMedia(call),
+        requestSignalTicket(call, controller),
+      ])
+
+      if (
+        !stream ||
+        !ticketPayload?.signalUrl ||
+        !ticketPayload?.ticket ||
+        !mediaLifecycleIsCurrent(generation, call)
+      ) {
+        return false
+      }
+
+      try {
+        const peer = await createPeerConnectionForCall(
+          call,
+          stream,
+          {
+            onIceCandidate: (candidate) => {
+              signalSocketRef.current?.emit('ice-candidate', candidate)
+            },
+          },
+        )
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const socket = io(ticketPayload.signalUrl, {
+          autoConnect: false,
+          auth: { ticket: ticketPayload.ticket },
+          timeout: 10000,
+          reconnection: true,
+        })
+
+        signalSocketRef.current = socket
+        signalPeerReadyRef.current = false
+        socketRemoteCandidatesRef.current = []
+        installSignalSocketHandlers(call, peer, socket, generation)
+
+        socket.connect()
+        await waitForSignalSocketConnect(socket, controller?.signal || null)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const caller = call.callerAccountId === account?.id
+        if (!caller) {
+          setMediaState('waiting-offer')
+          return true
+        }
+
+        await waitForSignalPeerReady(socket, controller?.signal || null)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const offer = await peer.createOffer()
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        await peer.setLocalDescription(offer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        socket.emit('offer', {
+          type: peer.localDescription.type,
+          sdp: peer.localDescription.sdp,
+        })
+        setMediaState('connecting')
+        return true
+      } catch (requestError) {
+        if (!mediaLifecycleIsCurrent(generation, call)) return false
+        markSignalingFailure(requestError)
+        return false
+      }
+    })().finally(() => {
+      if (mediaLifecycleGenerationRef.current === generation) {
+        mediaSetupPromiseRef.current = null
+      }
+    })
+
+    return mediaSetupPromiseRef.current
   }
 
   async function beginCallerMedia(call) {
@@ -1858,26 +2260,10 @@ export default function CommsPanel({
     mediaCallIdRef.current = call.id
     setMediaState('preparing')
     setMediaError('')
+    setSignalPollingReady(false)
 
     try {
-      const caller = call.callerAccountId === account?.id
-
-      if (caller) {
-        const started = await beginCallerMedia(call)
-        if (
-          started &&
-          currentCallRef.current?.id === call.id &&
-          currentCallRef.current?.status === 'accepted'
-        ) {
-          sessionPollingStartedAtRef.current = Date.now()
-          setSignalPollingReady(true)
-        }
-        return
-      }
-
-      sessionPollingStartedAtRef.current = Date.now()
-      setSignalPollingReady(true)
-      setMediaState('waiting-offer')
+      await beginDirectSocketMedia(call, controller)
     } catch (requestError) {
       if (requestError?.name !== 'AbortError') {
         markSignalingFailure(requestError)
@@ -2101,6 +2487,10 @@ export default function CommsPanel({
 
       if (!payload.call?.id) {
         throw new Error('The server did not return the canonical call.')
+      }
+
+      if (action === 'end') {
+        signalSocketRef.current?.emit('call-end')
       }
 
       setCanonicalCall(payload.call)
