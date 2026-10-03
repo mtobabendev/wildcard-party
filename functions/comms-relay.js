@@ -1,5 +1,5 @@
-import { upgradeWebSocket } from '@neon/functions'
-import { neon } from '@neondatabase/serverless'
+import { upgradeWebSocket } from '@neondatabase/functions'
+import pg from 'pg'
 import { verifySignalTicket } from '../lib/comms-signal-ticket.js'
 
 const RELAY_RETENTION_SECONDS = 120
@@ -14,7 +14,9 @@ const ALLOWED_EVENTS = new Set([
   'call-end',
 ])
 
-let sqlClient
+const { Pool } = pg
+
+let pool
 let schemaPromise
 
 function database() {
@@ -22,11 +24,15 @@ function database() {
     throw new Error('DATABASE_URL is not configured.')
   }
 
-  if (!sqlClient) {
-    sqlClient = neon(process.env.DATABASE_URL)
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 5,
+      idleTimeoutMillis: 60000,
+    })
   }
 
-  return sqlClient
+  return pool
 }
 
 function ensureRelaySchema() {
@@ -34,7 +40,7 @@ function ensureRelaySchema() {
     schemaPromise = (async () => {
       const sql = database()
 
-      await sql`
+      await sql.query(`
         CREATE TABLE IF NOT EXISTS wildcard_signal_relay (
           id bigserial PRIMARY KEY,
           call_id uuid NOT NULL,
@@ -46,12 +52,12 @@ function ensureRelaySchema() {
           payload jsonb NULL,
           created_at timestamptz NOT NULL DEFAULT now()
         )
-      `
+      `)
 
-      await sql`
+      await sql.query(`
         CREATE INDEX IF NOT EXISTS wildcard_signal_relay_call_id_id_idx
         ON wildcard_signal_relay (call_id, id)
-      `
+      `)
     })().catch((error) => {
       schemaPromise = null
       throw error
@@ -156,49 +162,59 @@ function normalizeSignalMessage(value, role) {
 }
 
 async function deleteExpiredRows(sql) {
-  await sql`
-    DELETE FROM wildcard_signal_relay
-    WHERE created_at < now() - interval '2 minutes'
-  `
+  await sql.query(
+    `
+      DELETE FROM wildcard_signal_relay
+      WHERE created_at < now() - interval '2 minutes'
+    `,
+  )
 }
 
 async function insertRelayRow(sql, identity, message) {
   const payloadJson = message.payload === null
     ? null
-    : JSON.stringify(message.payload)
+    : message.payload
 
-  await sql`
-    INSERT INTO wildcard_signal_relay (
-      call_id,
-      sender_account_id,
-      sender_role,
-      event_type,
-      payload
-    )
-    VALUES (
-      ${identity.callId}::uuid,
-      ${identity.accountId}::uuid,
-      ${identity.role},
-      ${message.type},
-      ${payloadJson}::jsonb
-    )
-  `
+  await sql.query(
+    `
+      INSERT INTO wildcard_signal_relay (
+        call_id,
+        sender_account_id,
+        sender_role,
+        event_type,
+        payload
+      )
+      VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb)
+    `,
+    [
+      identity.callId,
+      identity.accountId,
+      identity.role,
+      message.type,
+      payloadJson,
+    ],
+  )
 }
 
 async function readRelayRows(sql, identity, cursor) {
-  return sql`
-    SELECT
-      id,
-      event_type,
-      payload
-    FROM wildcard_signal_relay
-    WHERE call_id = ${identity.callId}::uuid
-      AND id > ${cursor}::bigint
-      AND sender_account_id <> ${identity.accountId}::uuid
-      AND created_at >= now() - interval '2 minutes'
-    ORDER BY id ASC
-    LIMIT 100
-  `
+  const result = await sql.query(
+    `
+      SELECT
+        id,
+        event_type,
+        payload
+      FROM wildcard_signal_relay
+      WHERE call_id = $1::uuid
+        AND id > $2::bigint
+        AND sender_account_id <> $3::uuid
+        AND created_at >= now() - interval '2 minutes'
+      ORDER BY id ASC
+      LIMIT 100
+    `,
+    [identity.callId, cursor, identity.accountId],
+  )
+
+  return result.rows
 }
 
 function jsonEvent(row) {
