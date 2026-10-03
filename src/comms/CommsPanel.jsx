@@ -1802,19 +1802,12 @@ export default function CommsPanel({
     const generation = mediaLifecycleGenerationRef.current
 
     mediaSetupPromiseRef.current = (async () => {
-      const [stream, ticketPayload] = await Promise.all([
-        acquireLocalMedia(call),
-        requestSignalTicket(call, controller),
-      ])
+      const ticketPromise = requestSignalTicket(call, controller)
+        .then((payload) => ({ payload, error: null }))
+        .catch((error) => ({ payload: null, error }))
 
-      if (
-        !stream ||
-        !ticketPayload?.signalUrl ||
-        !ticketPayload?.ticket ||
-        !mediaLifecycleIsCurrent(generation, call)
-      ) {
-        return false
-      }
+      const stream = await acquireLocalMedia(call)
+      if (!stream || !mediaLifecycleIsCurrent(generation, call)) return false
 
       try {
         const peer = await createPeerConnectionForCall(
@@ -1827,6 +1820,14 @@ export default function CommsPanel({
           },
         )
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const ticketResult = await ticketPromise
+        if (ticketResult.error) throw ticketResult.error
+
+        const ticketPayload = ticketResult.payload
+        if (!ticketPayload?.signalUrl || !ticketPayload?.ticket) {
+          throw new Error('Realtime signaling ticket response was invalid.')
+        }
 
         const socket = io(ticketPayload.signalUrl, {
           autoConnect: false,
