@@ -378,6 +378,7 @@ export default function CommsPanel({
   const mediaSetupPromiseRef = useRef(null)
   const mediaLifecycleGenerationRef = useRef(0)
   const signalSendChainRef = useRef(Promise.resolve())
+  const sessionPollingStartedAtRef = useRef(0)
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
@@ -884,6 +885,7 @@ export default function CommsPanel({
     remoteOfferRef.current = null
     remoteAnswerRef.current = null
     signalSendChainRef.current = Promise.resolve()
+    sessionPollingStartedAtRef.current = 0
 
     if (resetState) {
       setSignalPollingReady(false)
@@ -1152,6 +1154,109 @@ export default function CommsPanel({
     }
   }
 
+  async function requestCallSessionJson(
+    url,
+    options = {},
+    parentController = null,
+  ) {
+    const requestController = new AbortController()
+    const parentSignal = parentController?.signal || null
+    let abortReason = ''
+
+    const handleParentAbort = () => {
+      if (requestController.signal.aborted) return
+      abortReason = 'lifecycle'
+      requestController.abort()
+    }
+
+    if (parentSignal?.aborted) {
+      abortReason = 'lifecycle'
+      requestController.abort()
+    } else {
+      parentSignal?.addEventListener('abort', handleParentAbort, { once: true })
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (requestController.signal.aborted) return
+      abortReason = 'timeout'
+      requestController.abort()
+    }, 10000)
+
+    try {
+      return await requestJson(url, options, requestController)
+    } catch (requestError) {
+      if (requestError?.name === 'AbortError' && abortReason === 'timeout') {
+        const timeoutError = new Error('Call-session request timed out.')
+        timeoutError.code = 'CALL_SESSION_TIMEOUT'
+        throw timeoutError
+      }
+      throw requestError
+    } finally {
+      window.clearTimeout(timeout)
+      parentSignal?.removeEventListener('abort', handleParentAbort)
+    }
+  }
+
+  async function postCallSessionDescription(call, type, payload, controller = null) {
+    return requestCallSessionJson(
+      '/api/comms/call-session',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callId: call.id,
+          type,
+          payload,
+        }),
+      },
+      controller,
+    )
+  }
+
+  function waitForIceGatheringComplete(peer, timeoutMs = 8000, signal = null) {
+    if (peer.iceGatheringState === 'complete') return Promise.resolve()
+
+    return new Promise((resolve, reject) => {
+      let timeout = null
+      let settled = false
+
+      const cleanup = () => {
+        peer.removeEventListener('icegatheringstatechange', handleStateChange)
+        signal?.removeEventListener('abort', handleAbort)
+        if (timeout) window.clearTimeout(timeout)
+      }
+
+      const finish = (callback) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback()
+      }
+
+      const handleStateChange = () => {
+        if (peer.iceGatheringState === 'complete') {
+          finish(resolve)
+        }
+      }
+
+      const handleAbort = () => {
+        const abortError = new Error('Media lifecycle changed during ICE gathering.')
+        abortError.name = 'AbortError'
+        finish(() => reject(abortError))
+      }
+
+      peer.addEventListener('icegatheringstatechange', handleStateChange)
+
+      if (signal?.aborted) {
+        handleAbort()
+        return
+      }
+
+      signal?.addEventListener('abort', handleAbort, { once: true })
+      timeout = window.setTimeout(() => finish(resolve), timeoutMs)
+    })
+  }
+
   function enqueueIceSignal(call, candidate) {
     signalSendChainRef.current = signalSendChainRef.current
       .then(() => postSignalWithRetry(call, 'ice', candidate))
@@ -1252,7 +1357,11 @@ export default function CommsPanel({
     }
   }
 
-  async function createPeerConnectionForCall(call, localStream) {
+  async function createPeerConnectionForCall(
+    call,
+    localStream,
+    { trickleIce = true } = {},
+  ) {
     if (
       peerConnectionRef.current &&
       mediaCallIdRef.current === call.id
@@ -1280,16 +1389,18 @@ export default function CommsPanel({
     remoteStreamRef.current = remoteStream
     remoteVideoStreamRef.current = remoteVideoStream
 
-    peer.onicecandidate = (event) => {
-      if (!event.candidate) return
+    if (trickleIce) {
+      peer.onicecandidate = (event) => {
+        if (!event.candidate) return
 
-      const candidate = event.candidate.toJSON()
-      if (!localSdpStoredRef.current) {
-        pendingLocalCandidatesRef.current.push(candidate)
-        return
+        const candidate = event.candidate.toJSON()
+        if (!localSdpStoredRef.current) {
+          pendingLocalCandidatesRef.current.push(candidate)
+          return
+        }
+
+        enqueueIceSignal(call, candidate)
       }
-
-      enqueueIceSignal(call, candidate)
     }
 
     peer.ontrack = (event) => {
@@ -1370,13 +1481,18 @@ export default function CommsPanel({
     if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
 
     const generation = mediaLifecycleGenerationRef.current
+    const lifecycleController = mediaBootstrapControllerRef.current
 
     mediaSetupPromiseRef.current = (async () => {
       const stream = await acquireLocalMedia(call)
       if (!stream || !mediaLifecycleIsCurrent(generation, call)) return false
 
       try {
-        const peer = await createPeerConnectionForCall(call, stream)
+        const peer = await createPeerConnectionForCall(
+          call,
+          stream,
+          { trickleIce: false },
+        )
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         const offer = await peer.createOffer()
@@ -1385,16 +1501,30 @@ export default function CommsPanel({
         await peer.setLocalDescription(offer)
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
-        await postSignalWithRetry(call, 'offer', {
-          type: peer.localDescription.type,
-          sdp: peer.localDescription.sdp,
-        })
+        await waitForIceGatheringComplete(
+          peer,
+          8000,
+          lifecycleController?.signal || null,
+        )
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const canonicalOffer = peer.localDescription
+        if (!canonicalOffer?.sdp) {
+          throw new Error('Canonical local offer was unavailable.')
+        }
+
+        await postCallSessionDescription(
+          call,
+          'offer',
+          {
+            type: canonicalOffer.type,
+            sdp: canonicalOffer.sdp,
+          },
+          lifecycleController,
+        )
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         localSdpStoredRef.current = true
-        await flushLocalCandidates(call)
-        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
-
         setMediaState('connecting')
         return true
       } catch (requestError) {
@@ -1417,13 +1547,18 @@ export default function CommsPanel({
     if (mediaSetupPromiseRef.current) return mediaSetupPromiseRef.current
 
     const generation = mediaLifecycleGenerationRef.current
+    const lifecycleController = mediaBootstrapControllerRef.current
 
     mediaSetupPromiseRef.current = (async () => {
       const stream = await acquireLocalMedia(call)
       if (!stream || !mediaLifecycleIsCurrent(generation, call)) return false
 
       try {
-        const peer = await createPeerConnectionForCall(call, stream)
+        const peer = await createPeerConnectionForCall(
+          call,
+          stream,
+          { trickleIce: false },
+        )
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         await peer.setRemoteDescription(offerPayload)
@@ -1440,25 +1575,37 @@ export default function CommsPanel({
           }
         }
 
-        await flushRemoteCandidates()
-        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
-
         const answer = await peer.createAnswer()
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         await peer.setLocalDescription(answer)
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
-        await postSignalWithRetry(call, 'answer', {
-          type: peer.localDescription.type,
-          sdp: peer.localDescription.sdp,
-        })
+        await waitForIceGatheringComplete(
+          peer,
+          8000,
+          lifecycleController?.signal || null,
+        )
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
+
+        const canonicalAnswer = peer.localDescription
+        if (!canonicalAnswer?.sdp) {
+          throw new Error('Canonical local answer was unavailable.')
+        }
+
+        await postCallSessionDescription(
+          call,
+          'answer',
+          {
+            type: canonicalAnswer.type,
+            sdp: canonicalAnswer.sdp,
+          },
+          lifecycleController,
+        )
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
 
         localSdpStoredRef.current = true
-        await flushLocalCandidates(call)
-        if (!mediaLifecycleIsCurrent(generation, call, peer)) return false
-
+        setSignalPollingReady(false)
         setMediaState('connecting')
         return true
       } catch (requestError) {
@@ -1654,60 +1801,83 @@ export default function CommsPanel({
     }
   }
 
+  async function pollCallSession(call, controller = null) {
+    if (
+      sessionPollingStartedAtRef.current &&
+      Date.now() - sessionPollingStartedAtRef.current >= 60000
+    ) {
+      setSignalPollingReady(false)
+      setMediaState('failed')
+      setMediaError('MEDIA SIGNALING FAILED')
+      return
+    }
+
+    const payload = await requestCallSessionJson(
+      `/api/comms/call-session?callId=${encodeURIComponent(call.id)}`,
+      {},
+      controller,
+    )
+    const session = payload?.session || {}
+    const caller = call.callerAccountId === account?.id
+
+    if (caller) {
+      if (!session.answer || remoteAnswerRef.current) return
+
+      const peer = peerConnectionRef.current
+      const generation = mediaLifecycleGenerationRef.current
+      if (!peer || !mediaLifecycleIsCurrent(generation, call, peer)) return
+
+      try {
+        await peer.setRemoteDescription(session.answer)
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+        remoteAnswerRef.current = session.answer
+        setSignalPollingReady(false)
+        setMediaState('connecting')
+      } catch {
+        if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+        setSignalPollingReady(false)
+        setMediaState('failed')
+        setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
+      }
+      return
+    }
+
+    if (session.answer) {
+      setSignalPollingReady(false)
+      setMediaState('redial')
+      setMediaError('')
+      return
+    }
+
+    if (!session.offer || remoteOfferRef.current) return
+    await beginCalleeMedia(call, session.offer)
+  }
+
   async function bootstrapAcceptedMedia(call, controller) {
     mediaCallIdRef.current = call.id
     setMediaState('preparing')
     setMediaError('')
 
     try {
-      const backlog = await fetchSignalBacklog(call.id, '0', controller)
-      signalCursorRef.current = backlog.nextAfter
-
-      if (
-        currentCallRef.current?.id !== call.id ||
-        currentCallRef.current?.status !== 'accepted'
-      ) {
-        return
-      }
-
       const caller = call.callerAccountId === account?.id
-      const ownOffer = backlog.signals.find(
-        (signal) => signal.type === 'offer' && signal.senderAccountId === account?.id,
-      )
-      const ownAnswer = backlog.signals.find(
-        (signal) => signal.type === 'answer' && signal.senderAccountId === account?.id,
-      )
-
-      if ((caller && ownOffer) || (!caller && ownAnswer)) {
-        setSignalPollingReady(false)
-        setMediaState('redial')
-        setMediaError('')
-        return
-      }
 
       if (caller) {
         const started = await beginCallerMedia(call)
-        setSignalPollingReady(Boolean(started))
+        if (
+          started &&
+          currentCallRef.current?.id === call.id &&
+          currentCallRef.current?.status === 'accepted'
+        ) {
+          sessionPollingStartedAtRef.current = Date.now()
+          setSignalPollingReady(true)
+        }
         return
       }
 
+      sessionPollingStartedAtRef.current = Date.now()
       setSignalPollingReady(true)
-
-      let sawOffer = false
-      let diagnosticBacklogCursor = '0'
-      for (const signal of backlog.signals) {
-        if (signal.type === 'offer' && signal.senderAccountId !== account?.id) {
-          sawOffer = true
-        }
-        await processRemoteSignal(call, signal, diagnosticBacklogCursor)
-        diagnosticBacklogCursor = signal.sequence || diagnosticBacklogCursor
-      }
-
-      if (!sawOffer) {
-        setMediaState('waiting-offer')
-      } else if (!peerConnectionRef.current) {
-        setSignalPollingReady(false)
-      }
+      setMediaState('waiting-offer')
     } catch (requestError) {
       if (requestError?.name !== 'AbortError') {
         markSignalingFailure(requestError)
@@ -2373,13 +2543,13 @@ export default function CommsPanel({
       signalPollControllerRef.current = controller
 
       try {
-        await pollSignalCatchup(call, controller)
+        await pollCallSession(call, controller)
       } catch (requestError) {
         if (
           requestError?.name !== 'AbortError' &&
           requestError?.code !== 'SIGNAL_STATE_CONFLICT'
         ) {
-          console.error('COMMS media signaling poll failed', {
+          console.error('COMMS call-session poll failed', {
             code: requestError?.code || null,
             name: requestError?.name || null,
             status: requestError?.status || null,
