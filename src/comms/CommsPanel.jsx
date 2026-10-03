@@ -383,6 +383,7 @@ export default function CommsPanel({
   const signalSocketRef = useRef(null)
   const signalPeerReadyRef = useRef(false)
   const signalTicketRefreshPromiseRef = useRef(null)
+  const signalNegotiationTimerRef = useRef(null)
   const socketRemoteCandidatesRef = useRef([])
   const remoteAudioRef = useRef(null)
   const remoteVideoRef = useRef(null)
@@ -900,6 +901,10 @@ export default function CommsPanel({
     signalSocketRef.current = null
     signalPeerReadyRef.current = false
     signalTicketRefreshPromiseRef.current = null
+    if (signalNegotiationTimerRef.current) {
+      window.clearTimeout(signalNegotiationTimerRef.current)
+    }
+    signalNegotiationTimerRef.current = null
     socketRemoteCandidatesRef.current = []
 
     if (resetState) {
@@ -1693,6 +1698,26 @@ export default function CommsPanel({
     return signalTicketRefreshPromiseRef.current
   }
 
+  function clearSignalNegotiationTimeout() {
+    if (signalNegotiationTimerRef.current) {
+      window.clearTimeout(signalNegotiationTimerRef.current)
+      signalNegotiationTimerRef.current = null
+    }
+  }
+
+  function armSignalNegotiationTimeout(call, peer, generation, timeoutMs = 20000) {
+    clearSignalNegotiationTimeout()
+
+    signalNegotiationTimerRef.current = window.setTimeout(() => {
+      signalNegotiationTimerRef.current = null
+      if (!mediaLifecycleIsCurrent(generation, call, peer)) return
+
+      setMediaState('failed')
+      setMediaError('MEDIA SIGNALING FAILED')
+      signalSocketRef.current?.disconnect()
+    }, timeoutMs)
+  }
+
   function installSignalSocketHandlers(call, peer, socket, generation) {
     const caller = call.callerAccountId === account?.id
 
@@ -1720,6 +1745,7 @@ export default function CommsPanel({
       }
 
       try {
+        clearSignalNegotiationTimeout()
         remoteOfferRef.current = offer
         await peer.setRemoteDescription(offer)
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return
@@ -1767,6 +1793,7 @@ export default function CommsPanel({
       }
 
       try {
+        clearSignalNegotiationTimeout()
         await peer.setRemoteDescription(answer)
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return
 
@@ -1849,6 +1876,7 @@ export default function CommsPanel({
         const caller = call.callerAccountId === account?.id
         if (!caller) {
           setMediaState('waiting-offer')
+          armSignalNegotiationTimeout(call, peer, generation)
           return true
         }
 
@@ -1865,6 +1893,7 @@ export default function CommsPanel({
           type: peer.localDescription.type,
           sdp: peer.localDescription.sdp,
         })
+        armSignalNegotiationTimeout(call, peer, generation)
         setMediaState('connecting')
         return true
       } catch (requestError) {
