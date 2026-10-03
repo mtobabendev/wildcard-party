@@ -1750,6 +1750,7 @@ export default function CommsPanel({
         })
         setMediaState('connecting')
       } catch {
+        remoteOfferRef.current = null
         if (!mediaLifecycleIsCurrent(generation, call, peer)) return
         setMediaState('failed')
         setMediaError('REMOTE MEDIA DESCRIPTION FAILED')
