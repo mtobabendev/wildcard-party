@@ -2,7 +2,10 @@ import http from 'node:http'
 import { Server } from 'socket.io'
 import { verifySignalTicket } from '../lib/comms-signal-ticket.js'
 
-const PORT = Number.parseInt(process.env.PORT || '5050', 10)
+const requestedPort = Number.parseInt(process.env.PORT || '5050', 10)
+const PORT = Number.isInteger(requestedPort) && requestedPort > 0
+  ? requestedPort
+  : 5050
 const SIGNAL_SECRET = process.env.COMMS_SIGNAL_SECRET || ''
 const MAX_SDP_LENGTH = 131072
 const MAX_CANDIDATE_LENGTH = 8192
@@ -159,7 +162,6 @@ io.on('connection', async (socket) => {
   )
 
   if (distinctAccounts.size >= 2) {
-    socket.emit('signal-error', { code: 'ROOM_FULL' })
     socket.disconnect(true)
     return
   }
