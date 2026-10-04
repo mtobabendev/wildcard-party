@@ -177,6 +177,7 @@ export default function CommsPanel({
   const readInFlightRef = useRef(false)
   const pendingReadRef = useRef(null)
   const attachmentInputRef = useRef(null)
+
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
@@ -245,6 +246,8 @@ export default function CommsPanel({
     selectedConversationRef.current = null
     mobilePaneRef.current = 'list'
     pendingSendIdsRef.current.clear()
+    readMarkedRef.current.clear()
+    pendingReadRef.current = null
     onUnreadCountChange?.(0)
   }, [account?.id])
 
@@ -254,11 +257,7 @@ export default function CommsPanel({
     messageViewportRef.current.scrollTop = messageViewportRef.current.scrollHeight
   }, [messages])
 
-  async function requestJson(
-    url,
-    options = {},
-    suppliedController = null,
-  ) {
+  async function requestJson(url, options = {}, suppliedController = null) {
     const controller = suppliedController || new AbortController()
     allControllersRef.current.add(controller)
 
@@ -268,6 +267,13 @@ export default function CommsPanel({
         cache: 'no-store',
         signal: controller.signal,
       })
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        const requestError = new Error(payload?.error || 'COMMS request failed.')
+        requestError.status = response.status
+        throw requestError
+      }
 
       return payload
     } finally {
@@ -978,7 +984,7 @@ export default function CommsPanel({
                 <span className="comms-sigil" aria-hidden="true">
                   {initials(selectedConversation.otherAccount)}
                 </span>
-                <div className="comms-chat-party">
+                <div>
                   <strong>{selectedConversation.otherAccount?.displayName}</strong>
                   <small>
                     @{selectedConversation.otherAccount?.handle}
@@ -990,55 +996,6 @@ export default function CommsPanel({
                   </small>
                 </div>
               </header>
-
-              <nav
-                className="comms-mobile-switcher"
-                aria-label="Quick switch conversations"
-              >
-                {conversations.map((conversation) => {
-                  const unreadCount = numericUnreadCount(conversation.unreadCount)
-                  const isCurrent = selectedConversation?.id === conversation.id
-                  const label = conversation.otherAccount?.displayName
-                    || conversation.otherAccount?.handle
-                    || 'WildCard Account'
-
-                  return (
-                    <button
-                      type="button"
-                      key={conversation.id}
-                      className={isCurrent ? 'active' : ''}
-                      aria-current={isCurrent ? 'true' : undefined}
-                      aria-label={`Open conversation with ${label}${
-                        unreadCount > 0
-                          ? `, ${unreadCount} unread message${unreadCount === 1 ? '' : 's'}`
-                          : ''
-                      }`}
-                      onClick={() => selectConversation(conversation)}
-                    >
-                      <span className="comms-mobile-switcher-sigil" aria-hidden="true">
-                        {initials(conversation.otherAccount)}
-                      </span>
-                      <span className="comms-mobile-switcher-copy">
-                        <strong>{label}</strong>
-                        <small>
-                          @{conversation.otherAccount?.handle || 'unknown'}
-                          {conversation.otherPresence?.isOnline && (
-                            <b aria-label="Online"> ONLINE</b>
-                          )}
-                        </small>
-                      </span>
-                      {unreadCount > 0 && (
-                        <span
-                          className="comms-unread-badge"
-                          aria-hidden="true"
-                        >
-                          {displayUnreadCount(unreadCount)}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </nav>
 
               <div className="comms-history-tools">
                 {hasOlder ? (
