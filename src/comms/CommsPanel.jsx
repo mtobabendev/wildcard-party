@@ -2945,10 +2945,29 @@ export default function CommsPanel({
       if (document.hidden || callController) return
 
       const knownCall = currentCallRef.current
+      const knownCallSnapshot = knownCall
+        ? {
+            id: knownCall.id,
+            status: knownCall.status,
+            updatedAt: knownCall.updatedAt,
+          }
+        : null
       const pollingSpecific = isActiveCall(knownCall)
       const url = pollingSpecific
         ? `/api/comms/calls?id=${encodeURIComponent(knownCall.id)}`
         : '/api/comms/calls'
+
+      const canonicalCallMatchesPollStart = () => {
+        const currentCall = currentCallRef.current
+
+        if (!knownCallSnapshot) return !currentCall
+
+        return (
+          currentCall?.id === knownCallSnapshot.id
+          && currentCall?.status === knownCallSnapshot.status
+          && currentCall?.updatedAt === knownCallSnapshot.updatedAt
+        )
+      }
 
       const controller = new AbortController()
       callController = controller
@@ -2959,14 +2978,18 @@ export default function CommsPanel({
         if (payload.call) {
           setCanonicalCall(payload.call)
           setCallError('')
-        } else if (!knownCall || pollingSpecific) {
+        } else if ((!knownCall || pollingSpecific) && canonicalCallMatchesPollStart()) {
           setCanonicalCall(null)
         }
       } catch (requestError) {
         if (requestError?.name !== 'AbortError') {
-          if (requestError?.status === 404 && pollingSpecific) {
+          if (
+            requestError?.status === 404
+            && pollingSpecific
+            && canonicalCallMatchesPollStart()
+          ) {
             setCanonicalCall(null)
-          } else {
+          } else if (requestError?.status !== 404 || !pollingSpecific) {
             console.error('COMMS call poll failed', requestError)
           }
         }
