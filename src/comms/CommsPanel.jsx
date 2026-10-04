@@ -2975,7 +2975,7 @@ export default function CommsPanel({
       try {
         const payload = await requestJson(url, {}, controller)
 
-        if (payload.call) {
+        if (payload.call && canonicalCallMatchesPollStart()) {
           setCanonicalCall(payload.call)
           setCallError('')
         } else if ((!knownCall || pollingSpecific) && canonicalCallMatchesPollStart()) {
