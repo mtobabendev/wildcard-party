@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import AudioCall from './AudioCall.jsx'
 import './comms.css'
 
 const MAX_ATTACHMENT_BYTES = 10485760
@@ -996,6 +997,11 @@ export default function CommsPanel({
                   </small>
                 </div>
               </header>
+
+              <AudioCall
+                account={account}
+                conversation={selectedConversation}
+              />
 
               <div className="comms-history-tools">
                 {hasOlder ? (
