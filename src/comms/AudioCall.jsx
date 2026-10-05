@@ -23,6 +23,7 @@ export default function AudioCall({ account, conversation }) {
   const localStreamRef = useRef(null)
   const remoteStreamRef = useRef(null)
   const remoteIceRef = useRef([])
+  const iceServersRef = useRef([])
   const activeCallIdRef = useRef('')
   const callStateRef = useRef('idle')
   const lifecycleTokenRef = useRef(0)
@@ -100,7 +101,14 @@ export default function AudioCall({ account, conversation }) {
   function createPeer(callId) {
     if (peerRef.current) return peerRef.current
 
-    const peer = new RTCPeerConnection()
+    const iceServers = iceServersRef.current
+    if (!Array.isArray(iceServers) || !iceServers.length) {
+      throw new Error('Audio traversal is unavailable.')
+    }
+
+    const peer = new RTCPeerConnection({
+      iceServers,
+    })
     peerRef.current = peer
 
     const localStream = localStreamRef.current
@@ -245,6 +253,8 @@ export default function AudioCall({ account, conversation }) {
     let socket = null
 
     lifecycleTokenRef.current += 1
+    const lifecycleToken = lifecycleTokenRef.current
+    iceServersRef.current = []
     cleanupCall('idle')
     setError('')
     setSignalState('connecting')
@@ -258,26 +268,46 @@ export default function AudioCall({ account, conversation }) {
 
     async function connectSignal() {
       try {
-        const response = await fetch('/api/comms/audio-signal-ticket', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId: conversation.id }),
-        })
-        const payload = await response.json()
+        const [signalResponse, iceResponse] = await Promise.all([
+          fetch('/api/comms/audio-signal-ticket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId: conversation.id }),
+          }),
+          fetch('/api/comms/ice-servers', {
+            method: 'POST',
+          }),
+        ])
+        const [signalPayload, icePayload] = await Promise.all([
+          signalResponse.json(),
+          iceResponse.json(),
+        ])
 
-        if (!response.ok) {
-          throw new Error(payload?.error || 'Audio signaling ticket failed.')
+        if (!signalResponse.ok) {
+          throw new Error(signalPayload?.error || 'Audio signaling ticket failed.')
         }
-        if (disposed) return
+        if (!iceResponse.ok) {
+          throw new Error(icePayload?.error || 'Audio traversal is unavailable.')
+        }
+        if (!Array.isArray(icePayload?.iceServers) || !icePayload.iceServers.length) {
+          throw new Error('Audio traversal is unavailable.')
+        }
+        if (disposed || lifecycleTokenRef.current !== lifecycleToken) return
 
-        const separator = payload.relayUrl.includes('?') ? '&' : '?'
+        iceServersRef.current = icePayload.iceServers
+
+        const separator = signalPayload.relayUrl.includes('?') ? '&' : '?'
         socket = new WebSocket(
-          `${payload.relayUrl}${separator}ticket=${encodeURIComponent(payload.ticket)}`,
+          `${signalPayload.relayUrl}${separator}ticket=${encodeURIComponent(signalPayload.ticket)}`,
         )
         socketRef.current = socket
 
         socket.onopen = () => {
-          if (disposed || socketRef.current !== socket) return
+          if (
+            disposed ||
+            lifecycleTokenRef.current !== lifecycleToken ||
+            socketRef.current !== socket
+          ) return
           setSignalState('ready')
         }
 
@@ -297,7 +327,7 @@ export default function AudioCall({ account, conversation }) {
           // onclose owns the user-visible failure state.
         }
       } catch (connectError) {
-        if (disposed) return
+        if (disposed || lifecycleTokenRef.current !== lifecycleToken) return
         setError(connectError?.message || 'Audio signaling is unavailable.')
         setSignalState('unavailable')
       }
@@ -309,6 +339,7 @@ export default function AudioCall({ account, conversation }) {
       disposed = true
       intentionalClose = true
       lifecycleTokenRef.current += 1
+      iceServersRef.current = []
 
       sendActiveHangup()
       cleanupCall('idle')
