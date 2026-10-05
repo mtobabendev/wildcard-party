@@ -25,6 +25,7 @@ export default function AudioCall({ account, conversation }) {
   const remoteIceRef = useRef([])
   const activeCallIdRef = useRef('')
   const callStateRef = useRef('idle')
+  const lifecycleTokenRef = useRef(0)
   const audioRef = useRef(null)
 
   function setCallState(next) {
@@ -46,6 +47,12 @@ export default function AudioCall({ account, conversation }) {
       ...(payload === undefined ? {} : { payload }),
     }))
     return true
+  }
+
+  function sendActiveHangup() {
+    const callId = activeCallIdRef.current
+    if (!callId) return false
+    return sendSignal('hangup', callId)
   }
 
   function cleanupCall(nextState = 'idle') {
@@ -143,6 +150,7 @@ export default function AudioCall({ account, conversation }) {
         setCallState('connected')
       } else if (peer.connectionState === 'failed') {
         setError('Audio connection failed.')
+        sendActiveHangup()
         cleanupCall('idle')
       }
     }
@@ -226,6 +234,7 @@ export default function AudioCall({ account, conversation }) {
       }
     } catch {
       setError('Audio negotiation failed.')
+      sendActiveHangup()
       cleanupCall('idle')
     }
   }
@@ -235,6 +244,7 @@ export default function AudioCall({ account, conversation }) {
     let intentionalClose = false
     let socket = null
 
+    lifecycleTokenRef.current += 1
     cleanupCall('idle')
     setError('')
     setSignalState('connecting')
@@ -298,6 +308,10 @@ export default function AudioCall({ account, conversation }) {
     return () => {
       disposed = true
       intentionalClose = true
+      lifecycleTokenRef.current += 1
+
+      sendActiveHangup()
+      cleanupCall('idle')
 
       if (socketRef.current === socket) {
         socketRef.current = null
@@ -306,8 +320,6 @@ export default function AudioCall({ account, conversation }) {
         socket.onclose = null
         socket.close()
       }
-
-      cleanupCall('idle')
     }
   }, [account?.id, conversation?.id, reconnectToken])
 
@@ -315,6 +327,7 @@ export default function AudioCall({ account, conversation }) {
     if (callStateRef.current !== 'idle' || signalState !== 'ready') return
 
     const callId = crypto.randomUUID()
+    const lifecycleToken = lifecycleTokenRef.current
     setActiveCallId(callId)
     setCallState('inviting')
     setError('')
@@ -324,12 +337,30 @@ export default function AudioCall({ account, conversation }) {
         audio: true,
         video: false,
       })
+
+      if (
+        lifecycleTokenRef.current !== lifecycleToken ||
+        activeCallIdRef.current !== callId
+      ) {
+        for (const track of stream.getTracks()) {
+          track.stop()
+        }
+        return
+      }
+
       localStreamRef.current = stream
 
       if (!sendSignal('invite', callId)) {
         throw new Error('Audio signaling is unavailable.')
       }
     } catch (callError) {
+      if (
+        lifecycleTokenRef.current !== lifecycleToken ||
+        activeCallIdRef.current !== callId
+      ) {
+        return
+      }
+
       setError(callError?.message || 'Microphone access failed.')
       cleanupCall('idle')
     }
@@ -339,6 +370,7 @@ export default function AudioCall({ account, conversation }) {
     const callId = activeCallIdRef.current
     if (!callId || callStateRef.current !== 'incoming') return
 
+    const lifecycleToken = lifecycleTokenRef.current
     setError('')
     setCallState('connecting')
     setIncomingCallId('')
@@ -348,6 +380,17 @@ export default function AudioCall({ account, conversation }) {
         audio: true,
         video: false,
       })
+
+      if (
+        lifecycleTokenRef.current !== lifecycleToken ||
+        activeCallIdRef.current !== callId
+      ) {
+        for (const track of stream.getTracks()) {
+          track.stop()
+        }
+        return
+      }
+
       localStreamRef.current = stream
       createPeer(callId)
 
@@ -355,7 +398,15 @@ export default function AudioCall({ account, conversation }) {
         throw new Error('Audio signaling is unavailable.')
       }
     } catch (callError) {
+      if (
+        lifecycleTokenRef.current !== lifecycleToken ||
+        activeCallIdRef.current !== callId
+      ) {
+        return
+      }
+
       setError(callError?.message || 'Microphone access failed.')
+      sendActiveHangup()
       cleanupCall('idle')
     }
   }
@@ -399,7 +450,12 @@ export default function AudioCall({ account, conversation }) {
           <button type="button" onClick={startCall}>AUDIO TEST</button>
         )}
 
-        {callState === 'inviting' && <strong>CALLING…</strong>}
+        {callState === 'inviting' && (
+          <>
+            <strong>CALLING…</strong>
+            <button type="button" onClick={hangUp}>HANG UP</button>
+          </>
+        )}
 
         {callState === 'incoming' && (
           <>
@@ -409,7 +465,12 @@ export default function AudioCall({ account, conversation }) {
           </>
         )}
 
-        {callState === 'connecting' && <strong>CONNECTING AUDIO…</strong>}
+        {callState === 'connecting' && (
+          <>
+            <strong>CONNECTING AUDIO…</strong>
+            <button type="button" onClick={hangUp}>HANG UP</button>
+          </>
+        )}
 
         {callState === 'connected' && (
           <>
