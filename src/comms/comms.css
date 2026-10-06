@@ -768,36 +768,3 @@
     resize: none;
   }
 }
-
-
-.comms-audio-call {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.65rem 0.8rem;
-  border-bottom: 1px solid rgba(143, 89, 255, 0.24);
-  background: rgba(8, 8, 18, 0.72);
-}
-
-.comms-audio-call > audio {
-  display: none;
-}
-
-.comms-audio-call-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.comms-audio-call-main strong {
-  letter-spacing: 0.08em;
-  font-size: 0.76rem;
-}
-
-.comms-audio-call-main button {
-  min-height: 2rem;
-}
-
-.comms-audio-error {
-  color: var(--pink, #ff6bd6);
-}
