@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import './comms.css'
+import TwilioCall from './TwilioCall.jsx'
 
 const MAX_ATTACHMENT_BYTES = 10485760
 const ALLOWED_ATTACHMENT_TYPES = new Set([
@@ -996,6 +997,11 @@ export default function CommsPanel({
                   </small>
                 </div>
               </header>
+
+              <TwilioCall
+                account={account}
+                conversation={selectedConversation}
+              />
 
               <div className="comms-history-tools">
                 {hasOlder ? (

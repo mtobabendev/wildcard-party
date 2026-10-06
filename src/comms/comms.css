@@ -295,7 +295,7 @@
 .comms-chat {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-height: 560px;
   background: rgba(3,3,7,.28);
 }
@@ -766,5 +766,129 @@
     min-height: 48px;
     max-height: 70px;
     resize: none;
+  }
+}
+
+
+.comms-call {
+  padding: 9px 13px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  background: rgba(255,79,200,.025);
+}
+
+.comms-call button {
+  border: 1px solid rgba(255,79,200,.28);
+  border-radius: 9px;
+  background: rgba(255,79,200,.08);
+  color: #ff93df;
+  cursor: pointer;
+  padding: 7px 9px;
+  font-size: 7px;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+
+.comms-call button:disabled {
+  opacity: .38;
+  cursor: default;
+}
+
+.comms-call-actions,
+.comms-call-state,
+.comms-call-state > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.comms-call-actions {
+  justify-content: flex-end;
+}
+
+.comms-call-state {
+  justify-content: space-between;
+}
+
+.comms-call-state strong {
+  color: #d9d4de;
+  font-size: 8px;
+  letter-spacing: .08em;
+}
+
+.comms-call-error {
+  margin: 0 0 7px;
+  color: #ffafbd;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.comms-call-active {
+  display: grid;
+  gap: 8px;
+}
+
+.comms-call-video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.comms-call-video-grid > div {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px;
+  background: #020204;
+}
+
+.comms-call-video-grid small {
+  display: block;
+  margin-bottom: 5px;
+  color: #777280;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.comms-call-video-grid video,
+.comms-call-remote-media video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 7px;
+  background: #000;
+  object-fit: contain;
+}
+
+.comms-call-remote-media audio,
+.comms-call-audio-media {
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .comms-call {
+    padding: 8px 10px;
+  }
+
+  .comms-call-state {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .comms-call-state > div {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .comms-call-video-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .comms-call-video-grid video,
+  .comms-call-remote-media video {
+    max-height: 210px;
   }
 }
