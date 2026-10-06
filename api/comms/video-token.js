@@ -36,12 +36,24 @@ async function ensureRoom(client, roomName) {
   } catch (error) {
     if (error?.code !== 20404) throw error
 
-    return client.video.v1.rooms.create({
-      uniqueName: roomName,
-      type: 'group',
-      maxParticipants: 2,
-      recordParticipantsOnConnect: false,
-    })
+    try {
+      return await client.video.v1.rooms.create({
+        uniqueName: roomName,
+        type: 'group',
+        maxParticipants: 2,
+        recordParticipantsOnConnect: false,
+      })
+    } catch (createError) {
+      if (createError?.code !== 53113) throw createError
+
+      const room = await client.video.v1.rooms(roomName).fetch()
+      if (room.status === 'completed') {
+        const completedError = new Error('The Twilio Room for this call is already completed.')
+        completedError.code = 'CALL_ROOM_COMPLETED'
+        throw completedError
+      }
+      return room
+    }
   }
 }
 
