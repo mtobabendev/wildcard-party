@@ -13,7 +13,9 @@
     "react-dom": "^19.1.0",
     "@neondatabase/serverless": "^1.1.0",
     "@aws-sdk/client-s3": "^3.1138.0",
-    "@aws-sdk/s3-request-presigner": "^3.1138.0"
+    "@aws-sdk/s3-request-presigner": "^3.1138.0",
+    "twilio": "6.1.2",
+    "twilio-video": "2.36.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.4.1",
