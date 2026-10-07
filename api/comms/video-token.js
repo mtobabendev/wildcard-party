@@ -146,7 +146,7 @@ export default async function handler(req, res) {
       message: error?.message,
     })
     return res.status(500).json({
-      error: 'Video access token request failed.',
+      error: `Video access token request failed. (${phase})`,
       phase,
     })
   }
