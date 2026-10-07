@@ -59,6 +59,7 @@ async function ensureRoom(client, roomName) {
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
+  let phase = 'request validation'
 
   try {
     if (req.method !== 'POST') {
@@ -85,11 +86,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'A valid callId is required.' })
     }
 
+    phase = 'accepted-call lookup'
     const call = await acceptedCallForParticipant(account.id, callId)
     if (!call) {
       return res.status(404).json({ error: 'Accepted call not found.' })
     }
 
+    phase = 'credential validation'
     const accountSid = process.env.TWILIO_ACCOUNT_SID
     const apiKey = process.env.TWILIO_API_KEY
     const apiSecret = process.env.TWILIO_API_SECRET
@@ -101,6 +104,7 @@ export default async function handler(req, res) {
     const roomName = roomNameForCall(call.id)
     const client = twilio(apiKey, apiSecret, { accountSid })
 
+    phase = 'room ensure'
     try {
       await ensureRoom(client, roomName)
     } catch (error) {
@@ -112,16 +116,22 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: 'Twilio Video Room creation failed.' })
     }
 
+    phase = 'token constructor'
     const AccessToken = twilio.jwt.AccessToken
     const VideoGrant = AccessToken.VideoGrant
     const token = new AccessToken(accountSid, apiKey, apiSecret, {
       identity: account.id,
       ttl: 3600,
     })
+
+    phase = 'grant creation'
     token.addGrant(new VideoGrant({ room: roomName }))
 
+    phase = 'JWT serialization'
+    const jwt = token.toJwt()
+
     return res.status(200).json({
-      token: token.toJwt(),
+      token: jwt,
       roomName,
       mode: call.mode,
     })
@@ -130,7 +140,14 @@ export default async function handler(req, res) {
       return res.status(503).json({ error: 'COMMS persistence is not connected yet.' })
     }
 
-    console.error('comms video token api error', error)
-    return res.status(500).json({ error: 'Video access token request failed.' })
+    console.error('comms video token api error', {
+      phase,
+      code: error?.code,
+      message: error?.message,
+    })
+    return res.status(500).json({
+      error: 'Video access token request failed.',
+      phase,
+    })
   }
 }
