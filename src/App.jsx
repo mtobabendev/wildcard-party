@@ -1,3 +1,4 @@
+import PennyThoughtBubble from './components/PennyThoughtBubble.jsx'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 const navItems = [
@@ -1072,6 +1073,7 @@ function App() {
                 label="Penny profile animation"
               />
               <div className="profile-copy">
+                <PennyThoughtBubble provider="gemini" placement="party" />
                 <span className="profile-role">SITE ADMINISTRATOR</span>
                 <h2>Penny Morningstar</h2>
                 <p>@lilith.root</p>
