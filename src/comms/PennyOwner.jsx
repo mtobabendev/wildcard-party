@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import PennyOwnerChat from './PennyOwnerChat.jsx'
 
 async function request(view, signal) {
   const response = await fetch('/api/penny-owner?view=' + view, {
@@ -62,6 +63,7 @@ export default function PennyOwner() {
           <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(record.payload, null, 2)}</pre>
         </> : <p>No approved record found.</p>}
       </details>)}
+      <PennyOwnerChat />
     </>}
   </section>
 }
