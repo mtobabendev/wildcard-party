@@ -29,3 +29,25 @@
 .penny-thought__dialog p { color: #f7edff; font-size: .95rem; line-height: 1.5; margin: .8rem 0; }
 .penny-thought__dialog .penny-thought__status { color: #d0b9ea; font-size: .85rem; }
 .penny-thought__dialog a { color: #ffb5e8; text-decoration: underline; }
+
+
+/* Penny's ambient voice: warm pink, violet, and blue. Text remains unchanged. */
+.penny-thought__bubble {
+  border-color: #ff9bd3;
+  box-shadow: 0 0 8px #ff79bc88, 0 0 20px #ff79bc50;
+  animation: penny-thought-glow 7s ease-in-out infinite;
+}
+@keyframes penny-thought-glow {
+  0%, 100% { border-color: #ff9bd3; box-shadow: 0 0 8px #ff79bcaa, 0 0 20px #ff79bc60; }
+  33% { border-color: #ba8aff; box-shadow: 0 0 9px #ac76ffaa, 0 0 24px #ac76ff65; }
+  66% { border-color: #78cfff; box-shadow: 0 0 9px #61bfffaa, 0 0 24px #61bfff65; }
+}
+.penny-thought__bubble:hover, .penny-thought__bubble:focus-visible {
+  animation-play-state: paused;
+  outline: 2px solid #ffd2ef;
+  outline-offset: 3px;
+}
+.landing.is-page-hidden .penny-thought__bubble, .landing.is-section .penny-thought__bubble { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .penny-thought__bubble { animation: none; }
+}

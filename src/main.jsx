@@ -1,3 +1,4 @@
+import PennyContactRouter from './components/PennyContactRouter.jsx'
 import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
@@ -13,5 +14,6 @@ createRoot(document.getElementById('root')).render(
         <Messenger />
       </Suspense>
     ) : <App />}
+    <PennyContactRouter videoSource="https://www.wildcarddev.com/static/PennyContactAssistVideo.webm" />
   </StrictMode>,
 )
