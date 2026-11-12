@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './penny-core.css'
+import PennyOwner from './PennyOwner.jsx'
 
 async function request(options = {}) {
   const response = await fetch('/api/penny-core', { ...options, credentials: 'same-origin', cache: 'no-store' })
@@ -48,6 +49,7 @@ export default function PennyCore() {
     <section className="penny-core panel">
       <header><h1>♠ PENNY CORE</h1><p>Private AI continuity · WildCard DEV</p></header>
       <p>Only your signed-in account can access this state through the app. Saved notes and recent conversation are sent to the AI service when you chat. Do not store passwords, keys or sensitive records here.</p>
+      <PennyOwner />
       <button type="button" disabled={busy} onClick={() => {
         if (state && notes !== state.notes && !window.confirm('Discard unsaved notes?')) return
         setRefresh(value => value + 1)

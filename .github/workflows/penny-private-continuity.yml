@@ -4,6 +4,10 @@ on:
     paths:
       - 'api/penny.js'
       - 'api/penny-core.js'
+      - 'api/penny-owner.js'
+      - 'lib/penny-owner.js'
+      - 'src/comms/PennyOwner.jsx'
+      - 'test/penny-owner.test.js'
       - 'lib/penny-core-*.js'
       - 'src/comms/PennyCore.jsx'
       - 'src/comms/Messenger.jsx'
@@ -20,4 +24,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test test/penny-core-state.test.js test/penny-core-handler.test.js
+      - run: node --test test/penny-core-state.test.js test/penny-core-handler.test.js test/penny-owner.test.js
