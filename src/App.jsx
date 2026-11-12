@@ -1096,6 +1096,10 @@ function App() {
                   <span>Email</span>
                   <a href="mailto:Penny@WildCardDEV.com?subject=Hello%20Penny&body=Hi%20Penny%2C%0A%0AI%20found%20you%20through%20WildCard%20Party%20and%20wanted%20to%20get%20in%20touch.%0A%0A">Penny@WildCardDEV.com</a>
                 </div>
+                <div className="profile-contact-row">
+                  <span>Website</span>
+                  <a href="https://www.wildcarddev.com/">www.wildcarddev.com</a>
+                </div>
               </div>
               <div className="profile-stats">
                 <div><strong>∞</strong><span>ACCESS</span></div>
