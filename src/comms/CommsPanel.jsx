@@ -147,6 +147,7 @@ export default function CommsPanel({
   accountLoading = false,
   onRequireSignIn,
   onUnreadCountChange,
+  textOnly = false,
 }) {
   const [conversations, setConversations] = useState([])
   const [selectedConversation, setSelectedConversation] = useState(null)
@@ -698,7 +699,7 @@ export default function CommsPanel({
   async function sendMessage() {
     const conversationId = selectedConversation?.id
     const body = draft.trim()
-    const file = attachmentFile
+    const file = textOnly ? null : attachmentFile
     if (!conversationId || (!body && !file) || sendBusy) return
 
     const messageLength = Array.from(body).length
@@ -953,7 +954,7 @@ export default function CommsPanel({
                       {presenceText(conversation.otherPresence)}
                     </span>
                   </small>
-                  <em>{previewText(conversation.latestMessage)}</em>
+                  <em>{textOnly && conversation.latestMessage?.attachment && !conversation.latestMessage?.body ? 'Attachment omitted' : previewText(textOnly && conversation.latestMessage ? { ...conversation.latestMessage, attachment: null } : conversation.latestMessage)}</em>
                 </span>
                 {numericUnreadCount(conversation.unreadCount) > 0 && (
                   <span
@@ -998,10 +999,10 @@ export default function CommsPanel({
                 </div>
               </header>
 
-              <TwilioCall
+              {!textOnly && <TwilioCall
                 account={account}
                 conversation={selectedConversation}
-              />
+              />}
 
               <div className="comms-history-tools">
                 {hasOlder ? (
@@ -1027,7 +1028,7 @@ export default function CommsPanel({
 
                 {messages.map((message) => {
                   const outgoing = message.senderAccountId === account.id
-                  const attachment = message.attachment
+                  const attachment = textOnly ? null : message.attachment
                   const attachmentUrl = attachment?.id
                     ? `/api/comms/attachment?id=${encodeURIComponent(attachment.id)}`
                     : ''
@@ -1041,6 +1042,7 @@ export default function CommsPanel({
                       >
                         <span>{outgoing ? 'YOU' : 'INCOMING'}</span>
                         {message.body && <p>{message.body}</p>}
+                        {textOnly && message.attachment && <p>Attachment omitted in text-only Messenger.</p>}
                         {attachment?.isImage && attachmentUrl && (
                           <img
                             className="comms-attachment-image"
@@ -1116,7 +1118,7 @@ export default function CommsPanel({
                   placeholder={`Message @${selectedConversation.otherAccount?.handle || 'account'}`}
                   rows="3"
                 />
-                <input
+                {!textOnly && <><input
                   ref={attachmentInputRef}
                   className="comms-attachment-input"
                   type="file"
@@ -1140,13 +1142,13 @@ export default function CommsPanel({
                       </button>
                     </span>
                   )}
-                </div>
+                </div></>}
                 <div>
                   <small>ENTER sends • SHIFT+ENTER adds a line</small>
                   <button
                     type="button"
                     onClick={sendMessage}
-                    disabled={sendBusy || (!draft.trim() && !attachmentFile)}
+                    disabled={sendBusy || (!draft.trim() && (textOnly || !attachmentFile))}
                   >
                     {sendStage === 'uploading'
                       ? 'UPLOADING…'
