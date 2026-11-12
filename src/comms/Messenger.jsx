@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import CommsPanel from './CommsPanel.jsx'
+import PennyCore from './PennyCore.jsx'
 import './messenger.css'
 
 async function request(path, options = {}) {
@@ -17,6 +18,7 @@ export default function Messenger() {
   const [handle, setHandle] = useState('')
   const [password, setPassword] = useState('')
   const [unread, setUnread] = useState(0)
+  const [view, setView] = useState('comms')
   const formRef = useRef(null)
 
   useEffect(() => {
@@ -56,6 +58,7 @@ export default function Messenger() {
       await request('/api/auth/logout', { method: 'POST' })
       setAccount(null)
       setUnread(0)
+      setView('comms')
       setPassword('')
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
@@ -69,7 +72,11 @@ export default function Messenger() {
         <nav aria-label="Messenger navigation">
           <a href="/">Party</a>
           <a href="https://www.wildcarddev.com/">WildCard DEV</a>
-          {account && <button type="button" disabled={busy} onClick={signOut}>Sign out</button>}
+          {account && <>
+            <button type="button" aria-pressed={view === 'comms'} onClick={() => setView('comms')}>Messages</button>
+            <button type="button" aria-pressed={view === 'penny'} onClick={() => setView('penny')}>Penny Core</button>
+            <button type="button" disabled={busy} onClick={signOut}>Sign out</button>
+          </>}
         </nav>
       </header>
       {error && <p className="messenger-error" role="alert">{error}</p>}
@@ -82,6 +89,8 @@ export default function Messenger() {
           <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           <a href="/">Create an account in WildCard Party</a>
         </form>
+      ) : view === 'penny' ? (
+        <PennyCore key={account.id} />
       ) : (
         <CommsPanel key={account.id} account={account} accountLoading={false}
           onRequireSignIn={() => { setAccount(null); setUnread(0) }}

@@ -1,0 +1,23 @@
+name: Penny private continuity checks
+on:
+  pull_request:
+    paths:
+      - 'api/penny.js'
+      - 'api/penny-core.js'
+      - 'lib/penny-core-*.js'
+      - 'src/comms/PennyCore.jsx'
+      - 'src/comms/Messenger.jsx'
+      - 'test/penny-core-*.test.js'
+      - '.github/workflows/penny-private-continuity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  continuity-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test/penny-core-state.test.js test/penny-core-handler.test.js

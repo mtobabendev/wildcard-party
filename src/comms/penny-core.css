@@ -1,0 +1,12 @@
+.penny-core { padding: clamp(16px, 4vw, 32px); display: grid; gap: 16px; color: var(--silver); }
+.penny-core h1 { color: var(--pink); margin: 0; }
+.penny-core p { margin: 0; line-height: 1.5; }
+.penny-core form { display: grid; gap: 10px; }
+.penny-core label { font-weight: 700; }
+.penny-core textarea { width: 100%; background: #090910; color: #f8f7fb; border: 1px solid var(--line); border-radius: 10px; padding: 12px; resize: vertical; }
+.penny-core button { justify-self: start; width: fit-content; border: 1px solid var(--line); border-radius: 10px; background: #211525; padding: 10px 14px; cursor: pointer; }
+.penny-core button:disabled { opacity: .45; cursor: not-allowed; }
+.penny-core-history { display: grid; gap: 12px; max-height: 440px; overflow: auto; }
+.penny-core-history article { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.penny-core-history article strong { color: var(--pink); }
+.penny-core-history article p { white-space: pre-wrap; overflow-wrap: anywhere; }
