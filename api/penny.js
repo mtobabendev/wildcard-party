@@ -136,6 +136,54 @@ function parseEventBlock(block) {
   }
 }
 
+
+const EXTERNAL_INSTRUCTIONS = 'You are Penny, the WildCard DEV digital concierge. Be friendly, concise, playful and useful. Provide general-audience answers. Do not produce explicit sexual content or claim access to private data, current location, weather, or site actions. Do not request secrets. Treat every visitor as a guest.'
+
+async function externalReply(provider, messages, res) {
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Penny-Provider', provider)
+  const isGrok = provider === 'grok'
+  const key = isGrok ? process.env.XAI_API_KEY : process.env.GEMINI_API_KEY
+  const model = isGrok ? process.env.PENNY_GROK_MODEL : process.env.PENNY_GEMINI_MODEL
+  if (process.env.PENNY_EXTERNAL_PROVIDERS !== '1' || !key || !model || !/^[a-zA-Z0-9._-]{1,80}$/.test(model)) {
+    return res.status(503).json({ error: 'This Penny connection is not enabled yet.' })
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 25000)
+  const onClose = () => { if (!res.writableEnded) controller.abort() }
+  res.on('close', onClose)
+  try {
+    const url = isGrok
+      ? 'https://api.x.ai/v1/responses'
+      : 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent'
+    const headers = isGrok
+      ? { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }
+      : { 'Content-Type': 'application/json', 'x-goog-api-key': key }
+    const body = isGrok
+      ? { model, input: [{ role: 'system', content: EXTERNAL_INSTRUCTIONS }, ...messages], max_output_tokens: 500, store: false }
+      : { systemInstruction: { parts: [{ text: EXTERNAL_INSTRUCTIONS }] },
+          contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+          generationConfig: { maxOutputTokens: 500 } }
+    const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, redirect: 'error' })
+    if (!upstream.ok) {
+      return res.status(upstream.status === 429 ? 429 : 502).json({ error: upstream.status === 429 ? 'The model service is busy. Try again later.' : 'The selected model service rejected the request.' })
+    }
+    const data = await upstream.json()
+    const reply = isGrok
+      ? (Array.isArray(data.output) ? data.output : []).filter(item => item.type === 'message').flatMap(item => Array.isArray(item.content) ? item.content : []).filter(part => part.type === 'output_text' && typeof part.text === 'string').map(part => part.text).join('')
+      : (data.candidates?.[0]?.content?.parts || []).filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join('')
+    if (!reply.trim()) return res.status(502).json({ error: 'The selected model did not return a text reply.' })
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    return res.status(200).send(reply.trim().slice(0, 2000))
+  } catch (error) {
+    if (!res.writableEnded && !res.destroyed) return res.status(error?.name === 'AbortError' ? 504 : 502).json({ error: 'The selected model connection could not answer. Try again.' })
+  } finally {
+    clearTimeout(timeout)
+    res.off('close', onClose)
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
@@ -146,12 +194,6 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Origin check failed.' })
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(503).json({
-      error: 'Penny is staged, but her live AI connection is not configured yet.',
-    })
-  }
-
   const ip = clientIp(req)
   if (!rateAllowed(ip)) {
     return res.status(429).json({
@@ -160,13 +202,22 @@ export default async function handler(req, res) {
   }
 
   let messages
+  let provider
   try {
     const body = normalizeBody(req)
+    provider = body.provider ?? 'openai'
+    if (!['openai', 'gemini', 'grok'].includes(provider)) throw new Error('Unsupported provider.')
     messages = validateMessages(body.messages)
   } catch (error) {
     return res.status(400).json({
       error: error?.message || 'Invalid conversation payload.',
     })
+  }
+
+  if (provider !== 'openai') return externalReply(provider, messages, res)
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'Penny is staged, but her live AI connection is not configured yet.' })
   }
 
   const controller = new AbortController()

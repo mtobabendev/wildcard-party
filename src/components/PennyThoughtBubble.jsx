@@ -19,6 +19,11 @@ function getPeriod(hour) {
 export default function PennyThoughtBubble({ provider = 'gemini', placement = 'main' }) {
   const [clock, setClock] = useState(() => new Date())
   const [quipIndex, setQuipIndex] = useState(0)
+  const [draft, setDraft] = useState('')
+  const [messages, setMessages] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const request = useRef(null)
   const dialog = useRef(null)
   const trigger = useRef(null)
   const titleId = useId()
@@ -35,6 +40,46 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
     document.addEventListener('visibilitychange', onVisible)
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
+  useEffect(() => () => request.current?.abort(), [])
+  function close() {
+    request.current?.abort()
+    trigger.current?.focus()
+  }
+  async function send(event) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text || busy || request.current) return
+    const user = { role: 'user', content: text }
+    let history = messages.slice(-8)
+    while (history.length && history.reduce((sum, m) => sum + m.content.length, text.length) > 12000) history = history.slice(2)
+    const controller = new AbortController()
+    request.current = controller
+    setBusy(true)
+    setError('')
+    try {
+      const response = await fetch('/api/penny', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, messages: [...history, user] }),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'The selected connection is unavailable.')
+      }
+      const reply = (await response.text()).trim()
+      if (!reply) throw new Error('No text reply received.')
+      if (!controller.signal.aborted) {
+        setMessages([...history, user, { role: 'assistant', content: reply.slice(0, 2000) }])
+        setDraft('')
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause.message || 'The connection is unavailable.')
+    } finally {
+      if (request.current === controller) request.current = null
+      setBusy(false)
+    }
+  }
   function open() {
     setClock(new Date())
     dialog.current?.showModal()
@@ -46,13 +91,30 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
         <span className="penny-thought__quip">{quip}</span>
         <span className="penny-thought__hint">Talk to Penny</span>
       </button>
-      <dialog ref={dialog} className="penny-thought__dialog" aria-labelledby={titleId} onClose={() => trigger.current?.focus()}>
+      <dialog ref={dialog} className="penny-thought__dialog" aria-labelledby={titleId} onClose={close}>
         <div className="penny-thought__header">
           <h2 id={titleId}>♠ Penny · {name}</h2>
           <button type="button" onClick={() => dialog.current?.close()} aria-label="Close conversation">×</button>
         </div>
         <p>{greeting}! {quip}</p>
-        <p className="penny-thought__status">Live {name} conversation and local weather are not connected yet. This greeting runs on your device.</p>
+        <p className="penny-thought__status">Messages you send are processed by {name} when the connection is enabled. Avoid sensitive information. Local greetings do not call the AI.</p>
+        <div className="penny-thought__transcript" aria-live="polite">
+          {messages.map((message, i) => (
+            <div className={'penny-thought__turn penny-thought__turn--' + message.role} key={i}>
+              <strong>{message.role === 'user' ? 'You' : 'Penny · ' + name}</strong>
+              <p>{message.content}</p>
+            </div>
+          ))}
+          {busy && <p role="status">Connecting to {name}…</p>}
+        </div>
+        {error && <p className="penny-thought__status" role="alert">{error}</p>}
+        <form className="penny-thought__form" onSubmit={send}>
+          <textarea aria-label="Message Penny" placeholder={'Talk to Penny via ' + name} rows={2} maxLength={2000} value={draft} disabled={busy} onChange={event => setDraft(event.target.value)} />
+          <div className="penny-thought__form-actions">
+            <button type="button" disabled={busy} onClick={() => { setMessages([]); setDraft(''); setError('') }}>Clear</button>
+            <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+          </div>
+        </form>
         <a href="https://party.wildcarddev.com/?app=messenger" target="_blank" rel="noopener noreferrer">Open WildCard Messenger</a>
       </dialog>
     </div>

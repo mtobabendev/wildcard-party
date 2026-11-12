@@ -29,3 +29,17 @@
 .penny-thought__dialog p { color: #f7edff; font-size: .95rem; line-height: 1.5; margin: .8rem 0; }
 .penny-thought__dialog .penny-thought__status { color: #d0b9ea; font-size: .85rem; }
 .penny-thought__dialog a { color: #ffb5e8; text-decoration: underline; }
+
+/* Provider conversation: only the opened dialog, never the ambient bubble. */
+.penny-thought__transcript { display: grid; gap: .6rem; max-height: 42dvh; overflow-y: auto; overscroll-behavior: contain; }
+.penny-thought__transcript:empty { display: none; }
+.penny-thought__turn { min-width: 0; padding: .65rem .8rem; background: #22142f; border: 1px solid #674781; border-radius: .85rem; }
+.penny-thought__turn--user { background: #311b43; }
+.penny-thought__turn strong { font-size: .72rem; color: #ffb5e8; }
+.penny-thought__dialog .penny-thought__turn p { margin: .3rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.penny-thought__form { display: grid; gap: .6rem; margin: .9rem 0; }
+.penny-thought__form textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 44px; max-height: 10rem; padding: .6rem .7rem; background: #22142f; color: #f7edff; border: 1px solid #ab75ce; border-radius: .7rem; font: inherit; }
+.penny-thought__form-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.penny-thought__form button { min-height: 44px; padding: .5rem .85rem; border: 1px solid #ab75ce; border-radius: .7rem; background: #311b43; color: #f7edff; font: inherit; cursor: pointer; }
+.penny-thought__form button:disabled { opacity: .6; cursor: default; }
+.penny-thought__form textarea:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
