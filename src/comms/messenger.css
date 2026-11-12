@@ -1,0 +1,13 @@
+.messenger-app { width: min(1200px, calc(100% - 24px)); margin: 16px auto 32px; }
+.messenger-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.messenger-brand { color: var(--silver); font-weight: 900; letter-spacing: .1em; }
+.messenger-bar small { display: block; color: var(--pink); margin-top: 5px; }
+.messenger-bar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.messenger-bar a, .messenger-bar button, .messenger-login button { border: 1px solid var(--line); border-radius: 10px; background: #211525; color: #f8f7fb; padding: 10px 14px; text-decoration: none; cursor: pointer; }
+.messenger-login { max-width: 440px; margin: 32px auto; padding: 24px; display: grid; gap: 16px; }
+.messenger-login h1, .messenger-login p { margin: 0; }
+.messenger-login label { display: grid; gap: 6px; }
+.messenger-login input { width: 100%; background: #090910; color: white; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.messenger-error { color: #ffafbd; padding: 12px; }
+.messenger-app .comms-panel { width: 100%; }
+@media (max-width: 600px) { .messenger-app { width: calc(100% - 12px); margin-top: 6px; } .messenger-bar { padding: 12px; } }
