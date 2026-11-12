@@ -124,6 +124,19 @@ body::before {
 .profile-copy p, .profile-copy small { margin: 0; color: var(--muted); }
 .profile-copy p { font-size: 12px; }
 .profile-copy small { display: block; margin-top: 9px; line-height: 1.5; font-size: 11px; }
+.profile-contact { grid-column: 1 / -1; min-width: 0; display: grid; gap: 4px; margin: 8px 16px 0; padding: 9px 0 2px; border-top: 1px solid var(--line); font-size: 12px; }
+.profile-contact-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; padding: 5px 0; }
+.profile-contact-row > span:first-child { color: var(--muted); flex: 0 0 auto; }
+.profile-contact-row > time, .profile-contact-row > a, .profile-contact-number { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.profile-contact a, .profile-contact-number { color: var(--pink); text-decoration: underline; text-underline-offset: 3px; }
+.profile-contact a:hover, .profile-contact-phone summary:hover .profile-contact-number { color: #fff; }
+.profile-contact-phone summary { cursor: pointer; list-style: none; }
+.profile-contact-phone summary::-webkit-details-marker { display: none; }
+.profile-contact-number::after { content: ' ▾'; display: inline-block; text-decoration: none; }
+.profile-contact-phone[open] .profile-contact-number::after { content: ' ▴'; }
+.profile-contact-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 4px 0 6px; }
+.profile-contact-actions a { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 44px; border: 1px solid rgba(255,79,200,.3); border-radius: 10px; background: rgba(255,79,200,.07); padding: 6px; text-decoration: none; }
+.profile-contact a:focus-visible, .profile-contact-phone summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 4px; }
 .profile-stats { display: grid; grid-template-columns: repeat(3,1fr); border-top: 1px solid var(--line); margin: 8px 16px 0; padding-top: 13px; }
 .profile-stats div { text-align: center; border-right: 1px solid var(--line); }
 .profile-stats div:last-child { border-right: 0; }
