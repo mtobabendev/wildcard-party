@@ -1065,6 +1065,7 @@ function App() {
           <aside className="left-rail">
             <section className="panel profile-card">
               <div className="profile-cover" />
+              <PennyThoughtBubble provider="gemini" placement="party" />
               <SmartVideo
                 src="/assets/penny/card-art/PennyFBProfilePic1.webm"
                 poster="/assets/penny/card-art/PennyFBProfilePic1-poster.webp"
@@ -1073,7 +1074,6 @@ function App() {
                 label="Penny profile animation"
               />
               <div className="profile-copy">
-                <PennyThoughtBubble provider="gemini" placement="party" />
                 <span className="profile-role">SITE ADMINISTRATOR</span>
                 <h2>Penny Morningstar</h2>
                 <p>@lilith.root</p>
