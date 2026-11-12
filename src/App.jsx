@@ -1265,10 +1265,10 @@ function App() {
 
             <section className="panel associates">
               <span className="panel-label">KNOWN ASSOCIATES</span>
-              {['Kandy', 'Matt', 'The Spade'].map((name, index) => (
+              {['Kandy', 'Matt', 'Ashley'].map((name, index) => (
                 <div className="associate" key={name}>
                   <span className={'associate-avatar avatar-' + (index + 1)}>{name.slice(0, 1)}</span>
-                  <p><strong>{name}</strong><small>{index === 2 ? 'ROOM • OFFLINE' : 'PROFILE • STAGED'}</small></p>
+                  <p><strong>{name}</strong><small>PROFILE • STAGED</small></p>
                   <i />
                 </div>
               ))}
