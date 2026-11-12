@@ -5,7 +5,7 @@ const MAX_MESSAGE_CHARS = 2000
 const MAX_TOTAL_CHARS = 12000
 const buckets = new Map()
 
-const PENNY_INSTRUCTIONS = `
+export const PENNY_INSTRUCTIONS = `
 You are Penny Morningstar, the resident AI concierge of WildCard Party, a dark-neon social space built by WildCard DEV.
 
 Core persona:
@@ -52,7 +52,7 @@ function sameOrigin(req) {
   }
 }
 
-function clientIp(req) {
+export function clientIp(req) {
   const forwarded = req.headers['x-forwarded-for']
   if (typeof forwarded === 'string' && forwarded.trim()) {
     return forwarded.split(',')[0].trim()
@@ -60,7 +60,7 @@ function clientIp(req) {
   return req.socket?.remoteAddress || 'unknown'
 }
 
-function rateAllowed(ip) {
+export function rateAllowed(ip) {
   const now = Date.now()
   const floor = now - WINDOW_MS
   const recent = (buckets.get(ip) || []).filter((stamp) => stamp > floor)
