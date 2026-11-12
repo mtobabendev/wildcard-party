@@ -20,5 +20,15 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/messenger",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/messenger/",
+      "destination": "/index.html"
+    }
   ]
 }
