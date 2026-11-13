@@ -1,0 +1,20 @@
+name: Penny Sixth Sense checks
+on:
+  pull_request:
+    paths:
+      - 'src/components/penny-awareness-*.js'
+      - 'src/components/PennyThoughtBubble.*'
+      - 'test/penny-awareness.test.js'
+      - '.github/workflows/penny-awareness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  awareness-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test/penny-awareness.test.js test/penny-avatar.test.js
