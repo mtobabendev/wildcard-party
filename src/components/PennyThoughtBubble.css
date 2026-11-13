@@ -43,3 +43,29 @@
 .penny-thought__form button { min-height: 44px; padding: .5rem .85rem; border: 1px solid #ab75ce; border-radius: .7rem; background: #311b43; color: #f7edff; font: inherit; cursor: pointer; }
 .penny-thought__form button:disabled { opacity: .6; cursor: default; }
 .penny-thought__form textarea:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Ambient voice. No animated media in the closed thought bubble. */
+.penny-thought__bubble {
+  border-color: #ff9bd3;
+  box-shadow: 0 0 8px #ff79bc88, 0 0 20px #ff79bc50;
+  animation: penny-thought-glow 7s ease-in-out infinite;
+}
+@keyframes penny-thought-glow {
+  0%, 100% { border-color: #ff9bd3; box-shadow: 0 0 8px #ff79bcaa, 0 0 20px #ff79bc60; }
+  33% { border-color: #ba8aff; box-shadow: 0 0 9px #ac76ffaa, 0 0 24px #ac76ff65; }
+  66% { border-color: #78cfff; box-shadow: 0 0 9px #61bfffaa, 0 0 24px #61bfff65; }
+}
+.penny-thought__bubble:hover, .penny-thought__bubble:focus-visible,
+.penny-thought:has(.penny-thought__dialog[open]) .penny-thought__bubble,
+.landing.is-page-hidden .penny-thought__bubble, .landing.is-section .penny-thought__bubble,
+.penny-thought[data-page-hidden="true"] .penny-thought__bubble { animation-play-state: paused; }
+.penny-thought__bubble:hover, .penny-thought__bubble:focus-visible { outline: 2px solid #ffd2ef; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .penny-thought__bubble { animation: none; } }
+
+.penny-thought__avatar {
+  display: block; flex: 0 0 auto; width: clamp(72px, 20vw, 108px); aspect-ratio: 1;
+  overflow: hidden; border-radius: 50%; border: 2px solid #f899d7;
+  background: #21132d; box-shadow: 0 0 18px #f899d744;
+}
+.penny-thought__header h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.penny-thought__header button { flex: 0 0 auto; }

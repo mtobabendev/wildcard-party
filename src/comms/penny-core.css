@@ -10,3 +10,7 @@
 .penny-core-history article { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .penny-core-history article strong { color: var(--pink); }
 .penny-core-history article p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.penny-core__identity { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.penny-core__identity > div { min-width: 0; }
+.penny-core__avatar { display: block; width: clamp(72px, 20vw, 108px); aspect-ratio: 1; flex: 0 0 auto; overflow: hidden; border-radius: 50%; border: 2px solid #f899d7; background: #21132d; box-shadow: 0 0 18px #f899d744; }

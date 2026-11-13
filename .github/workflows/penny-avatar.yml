@@ -1,0 +1,23 @@
+name: Penny avatar lifecycle checks
+on:
+  pull_request:
+    paths:
+      - 'src/components/PennyActiveAvatar.*'
+      - 'src/components/penny-avatar-playback.js'
+      - 'src/components/PennyThoughtBubble.*'
+      - 'src/components/AskPenny.*'
+      - 'src/comms/PennyCore.jsx'
+      - 'test/penny-avatar.test.js'
+      - '.github/workflows/penny-avatar.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  avatar-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test/penny-avatar.test.js

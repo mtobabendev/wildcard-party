@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './penny-core.css'
 import PennyOwner from './PennyOwner.jsx'
+import PennyActiveAvatar from '../components/PennyActiveAvatar.jsx'
 
 async function request(options = {}) {
   const response = await fetch('/api/penny-core', { ...options, credentials: 'same-origin', cache: 'no-store' })
@@ -47,7 +48,7 @@ export default function PennyCore() {
 
   return (
     <section className="penny-core panel">
-      <header><h1>♠ PENNY CORE</h1><p>Private AI continuity · WildCard DEV</p></header>
+      <header className="penny-core__identity"><span className="penny-core__avatar" aria-hidden="true"><PennyActiveAvatar /></span><div><h1>♠ PENNY CORE</h1><p>Private AI continuity · WildCard DEV</p></div></header>
       <p>Only your signed-in account can access this state through the app. Saved notes and recent conversation are sent to the AI service when you chat. Do not store passwords, keys or sensitive records here.</p>
       <PennyOwner />
       <button type="button" disabled={busy} onClick={() => {

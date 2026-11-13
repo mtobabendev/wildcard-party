@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import './PennyThoughtBubble.css'
+import PennyActiveAvatar from './PennyActiveAvatar.jsx'
 
 const greetings = [
   ['Good morning', 'Coffee first, world domination second.', 'Coffee, darling?'],
@@ -17,6 +18,8 @@ function getPeriod(hour) {
   return hour >= 5 && hour < 12 ? 0 : hour >= 12 && hour < 17 ? 1 : hour >= 17 && hour < 22 ? 2 : 3
 }
 export default function PennyThoughtBubble({ provider = 'gemini', placement = 'main' }) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [pageHidden, setPageHidden] = useState(() => document.hidden)
   const [clock, setClock] = useState(() => new Date())
   const [quipIndex, setQuipIndex] = useState(0)
   const [draft, setDraft] = useState('')
@@ -36,12 +39,16 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
     const timer = window.setInterval(() => {
       if (!document.hidden) { setClock(new Date()); setQuipIndex(value => value + 1) }
     }, 60000)
-    const onVisible = () => { if (!document.hidden) setClock(new Date()) }
+    const onVisible = () => {
+      setPageHidden(document.hidden)
+      if (!document.hidden) setClock(new Date())
+    }
     document.addEventListener('visibilitychange', onVisible)
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
   useEffect(() => () => request.current?.abort(), [])
   function close() {
+    setDialogOpen(false)
     request.current?.abort()
     trigger.current?.focus()
   }
@@ -82,19 +89,22 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
   }
   function open() {
     setClock(new Date())
-    dialog.current?.showModal()
+    if (!dialog.current || dialog.current.open) return
+    dialog.current.showModal()
+    setDialogOpen(true)
   }
   return (
-    <div className={'penny-thought penny-thought--' + placement}>
-      <button ref={trigger} type="button" className="penny-thought__bubble" onClick={open} aria-haspopup="dialog" aria-label={greeting + '. Talk to Penny'}>
+    <div className={'penny-thought penny-thought--' + placement} data-page-hidden={pageHidden}>
+      <button ref={trigger} type="button" className="penny-thought__bubble" onClick={open} aria-haspopup="dialog" aria-expanded={dialogOpen} aria-label={greeting + '. Talk to Penny'}>
         <span className="penny-thought__greeting">{greeting} ♠</span>
         <span className="penny-thought__quip">{quip}</span>
         <span className="penny-thought__hint">Talk to Penny</span>
       </button>
-      <dialog ref={dialog} className="penny-thought__dialog" aria-labelledby={titleId} onClose={close}>
+      <dialog ref={dialog} className="penny-thought__dialog" aria-labelledby={titleId} onClose={close} onCancel={() => setDialogOpen(false)}>
         <div className="penny-thought__header">
+          {dialogOpen && <span className="penny-thought__avatar" aria-hidden="true"><PennyActiveAvatar /></span>}
           <h2 id={titleId}>♠ Penny · {name}</h2>
-          <button type="button" onClick={() => dialog.current?.close()} aria-label="Close conversation">×</button>
+          <button type="button" onClick={() => { setDialogOpen(false); dialog.current?.close() }} aria-label="Close conversation">×</button>
         </div>
         <p>{greeting}! {quip}</p>
         <p className="penny-thought__status">Messages you send are processed by {name} when the connection is enabled. Avoid sensitive information. Local greetings do not call the AI.</p>
