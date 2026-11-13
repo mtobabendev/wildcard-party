@@ -1,5 +1,6 @@
 import PennyThoughtBubble from './components/PennyThoughtBubble.jsx'
 import PennyPixelAvatar from './components/PennyPixelAvatar.jsx'
+import PennyActiveAvatar from './components/PennyActiveAvatar.jsx'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 const navItems = [
@@ -1327,7 +1328,7 @@ function App() {
           setPennyOpen((open) => !open)
         }}
       >
-        <span className="dock-sigil" aria-hidden="true"><PennyPixelAvatar /></span>
+        <span className="dock-sigil" aria-hidden="true">{pennyOpen ? "♠" : <PennyPixelAvatar />}</span>
         <span><b>ASK PENNY</b><small>CONCIERGE ONLINE</small></span>
         <i />
       </button>
@@ -1457,7 +1458,7 @@ function App() {
         <section className="penny-panel" aria-label="Ask Penny">
           <header>
             <div>
-              <span aria-hidden="true"><PennyPixelAvatar /></span>
+              <span className="penny-panel-avatar" aria-hidden="true"><PennyActiveAvatar videoSource="https://www.wildcarddev.com/static/PennyShowsTheWay.webm" poster="https://www.wildcarddev.com/static/NursePennyPortrait.jpg" /></span>
               <p><strong>PENNY</strong><small>WILDCARD CONCIERGE // LIVE</small></p>
             </div>
             <div className="penny-header-actions">

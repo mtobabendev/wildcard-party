@@ -13,8 +13,26 @@
   font-size: 1.5rem;
 }
 
-.dock-sigil:has(.penny-pixel-avatar),
-.penny-panel header > div:first-child > span:has(.penny-pixel-avatar) {
+.dock-sigil:has(.penny-pixel-avatar) {
   overflow: hidden;
   background: #1b1026;
+}
+
+.penny-panel header > div:first-child > span.penny-panel-avatar {
+  width: clamp(66px, 19vw, 104px);
+  height: auto;
+  aspect-ratio: 4 / 5;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: #1b1026;
+  border-radius: 12px;
+}
+.penny-panel-avatar .penny-active-avatar {
+  object-fit: cover;
+  object-position: 50% 0%;
+  transform: scale(1.12);
+  transform-origin: 50% 0%;
+}
+@media (max-height: 480px) {
+  .penny-panel header > div:first-child > span.penny-panel-avatar { width: 48px; }
 }
