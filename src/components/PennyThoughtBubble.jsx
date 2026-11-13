@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import './PennyThoughtBubble.css'
 import PennyActiveAvatar from './PennyActiveAvatar.jsx'
+import { usePennyAwareness } from './penny-awareness-client.js'
+import { CITIES, SIGNS } from './penny-awareness-data.js'
+
+const AWARENESS_ENDPOINT = 'https://www.wildcarddev.com/api/penny-awareness'
 
 const greetings = [
   ['Good morning', 'Coffee first, world domination second.', 'Coffee, darling?'],
@@ -35,9 +39,13 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
   const name = provider === 'grok' ? 'Grok' : 'Gemini'
   const greeting = greetings[period][0]
   const quip = quipIndex % 3 === 0 ? greetings[period][afterHours ? 2 : 1] : quips[period][(quipIndex - 1) % 2]
+  const awareness = usePennyAwareness(AWARENESS_ENDPOINT, clock)
+  const thought = awareness.alerts[0] || (quipIndex % 2 === 1 ? awareness.cards[Math.floor(quipIndex / 2) % awareness.cards.length] : null)
+  const heading = thought?.label || greeting
+  const line = thought?.text || quip
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!document.hidden) { setClock(new Date()); setQuipIndex(value => value + 1) }
+      if (!document.hidden) { setClock(new Date()); if (!dialog.current?.open) setQuipIndex(value => value + 1) }
     }, 60000)
     const onVisible = () => {
       setPageHidden(document.hidden)
@@ -95,9 +103,9 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
   }
   return (
     <div className={'penny-thought penny-thought--' + placement} data-page-hidden={pageHidden}>
-      <button ref={trigger} type="button" className="penny-thought__bubble" onClick={open} aria-haspopup="dialog" aria-expanded={dialogOpen} aria-label={greeting + '. Talk to Penny'}>
-        <span className="penny-thought__greeting">{greeting} ♠</span>
-        <span className="penny-thought__quip">{quip}</span>
+      <button ref={trigger} type="button" className="penny-thought__bubble" onClick={open} aria-haspopup="dialog" aria-expanded={dialogOpen} aria-label={heading + '. Talk to Penny'}>
+        <span className="penny-thought__greeting">{heading} ♠</span>
+        <span className="penny-thought__quip">{line}</span>
         <span className="penny-thought__hint">Talk to Penny</span>
       </button>
       <dialog ref={dialog} className="penny-thought__dialog" aria-labelledby={titleId} onClose={close} onCancel={() => setDialogOpen(false)}>
@@ -106,7 +114,23 @@ export default function PennyThoughtBubble({ provider = 'gemini', placement = 'm
           <h2 id={titleId}>♠ Penny · {name}</h2>
           <button type="button" onClick={() => { setDialogOpen(false); dialog.current?.close() }} aria-label="Close conversation">×</button>
         </div>
-        <p>{greeting}! {quip}</p>
+        <p>{thought ? line : greeting + '! ' + quip}</p>
+        {thought && <p className="penny-thought__source">
+          {thought.url ? <a href={thought.url} target="_blank" rel="noopener noreferrer">{thought.source} ↗</a> : thought.source}
+          {thought.observedAt && <small> · {thought.discoveredBy ? 'Indexed' : 'Source time'} {new Date(thought.observedAt).toLocaleString()}</small>}
+          {thought.discoveryUrl && <> · <a href={thought.discoveryUrl} target="_blank" rel="noopener noreferrer">GDELT</a></>}
+          {thought.day && <small> · {thought.day}</small>}
+        </p>}
+        <details className="penny-thought__preferences">
+          <summary>Sixth Sense · weather city & zodiac</summary>
+          <label>Weather city <select value={awareness.prefs.city} onChange={event=>awareness.choose('city',event.target.value)}>
+            {Object.entries(CITIES).map(([key,city])=><option key={key} value={key}>{city.label}</option>)}
+          </select></label>
+          <label>Daily reflection <select value={awareness.prefs.sign} onChange={event=>awareness.choose('sign',event.target.value)}>
+            {SIGNS.map(sign=><option key={sign} value={sign}>{sign}</option>)}
+          </select></label>
+          <small>Omaha is the WildCard default. No GPS requested. Preferences stay in this browser. Weather is informational; check official warnings. Horoscopes are for entertainment.</small>
+        </details>
         <p className="penny-thought__status">Messages you send are processed by {name} when the connection is enabled. Avoid sensitive information. Local greetings do not call the AI.</p>
         <div className="penny-thought__transcript" aria-live="polite">
           {messages.map((message, i) => (
