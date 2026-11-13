@@ -1,0 +1,20 @@
+name: Penny presentation checks
+on:
+  pull_request:
+    paths:
+      - 'api/penny.js'
+      - 'lib/penny-presentation.js'
+      - 'test/penny-presentation.test.js'
+      - '.github/workflows/penny-presentation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  presentation-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test/penny-presentation.test.js

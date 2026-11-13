@@ -1,3 +1,5 @@
+import { normalizePresentation, presentationInstructions } from '../lib/penny-presentation.js'
+
 const WINDOW_MS = 5 * 60 * 1000
 const MAX_REQUESTS = 12
 const MAX_MESSAGES = 10
@@ -139,7 +141,8 @@ function parseEventBlock(block) {
 
 const EXTERNAL_INSTRUCTIONS = 'You are Penny, the WildCard DEV digital concierge. Be friendly, concise, playful and useful. Provide general-audience answers. Do not produce explicit sexual content or claim access to private data, current location, weather, or site actions. Do not request secrets. Treat every visitor as a guest.'
 
-async function externalReply(provider, messages, res) {
+async function externalReply(provider, messages, res, presentation) {
+  const instructions = presentationInstructions(EXTERNAL_INSTRUCTIONS, presentation)
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Penny-Provider', provider)
@@ -161,8 +164,8 @@ async function externalReply(provider, messages, res) {
       ? { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }
       : { 'Content-Type': 'application/json', 'x-goog-api-key': key }
     const body = isGrok
-      ? { model, input: [{ role: 'system', content: EXTERNAL_INSTRUCTIONS }, ...messages], max_output_tokens: 500, store: false }
-      : { systemInstruction: { parts: [{ text: EXTERNAL_INSTRUCTIONS }] },
+      ? { model, input: [{ role: 'system', content: instructions }, ...messages], max_output_tokens: 500, store: false }
+      : { systemInstruction: { parts: [{ text: instructions }] },
           contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
           generationConfig: { maxOutputTokens: 500 } }
     const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, redirect: 'error' })
@@ -203,9 +206,11 @@ export default async function handler(req, res) {
 
   let messages
   let provider
+  let presentation
   try {
     const body = normalizeBody(req)
     provider = body.provider ?? 'openai'
+    presentation = normalizePresentation(body.presentation)
     if (!['openai', 'gemini', 'grok'].includes(provider)) throw new Error('Unsupported provider.')
     messages = validateMessages(body.messages)
   } catch (error) {
@@ -214,7 +219,7 @@ export default async function handler(req, res) {
     })
   }
 
-  if (provider !== 'openai') return externalReply(provider, messages, res)
+  if (provider !== 'openai') return externalReply(provider, messages, res, presentation)
 
   if (!process.env.OPENAI_API_KEY) {
     return res.status(503).json({ error: 'Penny is staged, but her live AI connection is not configured yet.' })
@@ -238,7 +243,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: process.env.PENNY_MODEL || 'gpt-5.6-luna',
-        instructions: PENNY_INSTRUCTIONS,
+        instructions: presentationInstructions(PENNY_INSTRUCTIONS, presentation),
         input: messages,
         reasoning: { effort: 'none' },
         max_output_tokens: 500,
