@@ -1,4 +1,5 @@
 import PennyThoughtBubble from './components/PennyThoughtBubble.jsx'
+import PennyPixelAvatar from './components/PennyPixelAvatar.jsx'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 const navItems = [
@@ -1326,7 +1327,7 @@ function App() {
           setPennyOpen((open) => !open)
         }}
       >
-        <span className="dock-sigil">♠</span>
+        <span className="dock-sigil" aria-hidden="true"><PennyPixelAvatar /></span>
         <span><b>ASK PENNY</b><small>CONCIERGE ONLINE</small></span>
         <i />
       </button>
@@ -1456,7 +1457,7 @@ function App() {
         <section className="penny-panel" aria-label="Ask Penny">
           <header>
             <div>
-              <span>♠</span>
+              <span aria-hidden="true"><PennyPixelAvatar /></span>
               <p><strong>PENNY</strong><small>WILDCARD CONCIERGE // LIVE</small></p>
             </div>
             <div className="penny-header-actions">
