@@ -141,6 +141,18 @@ function parseEventBlock(block) {
 
 const EXTERNAL_INSTRUCTIONS = 'You are Penny, the WildCard DEV digital concierge. Be friendly, concise, playful and useful. Provide general-audience answers. Do not produce explicit sexual content or claim access to private data, current location, weather, or site actions. Do not request secrets. Treat every visitor as a guest.'
 
+const SAFE_TRANSPORT_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+])
+
+function externalDiagnostic(provider, category, detail = {}) {
+  // Only fixed categories and allowlisted metadata. Never log URLs, keys,
+  // upstream bodies, visitor messages, or raw exception objects.
+  console.warn('penny_external_provider', { provider, category, ...detail })
+}
+
 async function externalReply(provider, messages, res, presentation) {
   const instructions = presentationInstructions(EXTERNAL_INSTRUCTIONS, presentation)
   res.setHeader('Cache-Control', 'no-store')
@@ -150,11 +162,17 @@ async function externalReply(provider, messages, res, presentation) {
   const key = isGrok ? process.env.XAI_API_KEY : process.env.GEMINI_API_KEY
   const model = isGrok ? process.env.PENNY_GROK_MODEL : process.env.PENNY_GEMINI_MODEL
   if (process.env.PENNY_EXTERNAL_PROVIDERS !== '1' || !key || !model || !/^[a-zA-Z0-9._-]{1,80}$/.test(model)) {
+    externalDiagnostic(provider, 'configuration_unavailable')
     return res.status(503).json({ error: 'This Penny connection is not enabled yet.' })
   }
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 25000)
-  const onClose = () => { if (!res.writableEnded) controller.abort() }
+  let timedOut = false
+  let disconnected = false
+  let phase = 'fetch'
+  const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 25000)
+  const onClose = () => {
+    if (!res.writableEnded) { disconnected = true; controller.abort() }
+  }
   res.on('close', onClose)
   try {
     const url = isGrok
@@ -170,17 +188,42 @@ async function externalReply(provider, messages, res, presentation) {
           generationConfig: { maxOutputTokens: 500 } }
     const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, redirect: 'error' })
     if (!upstream.ok) {
+      externalDiagnostic(provider, 'upstream_http', { status: upstream.status })
       return res.status(upstream.status === 429 ? 429 : 502).json({ error: upstream.status === 429 ? 'The model service is busy. Try again later.' : 'The selected model service rejected the request.' })
     }
+    phase = 'decode'
     const data = await upstream.json()
+    phase = 'extract'
+    const parts = data?.candidates?.[0]?.content?.parts
     const reply = isGrok
-      ? (Array.isArray(data.output) ? data.output : []).filter(item => item.type === 'message').flatMap(item => Array.isArray(item.content) ? item.content : []).filter(part => part.type === 'output_text' && typeof part.text === 'string').map(part => part.text).join('')
-      : (data.candidates?.[0]?.content?.parts || []).filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join('')
-    if (!reply.trim()) return res.status(502).json({ error: 'The selected model did not return a text reply.' })
+      ? (Array.isArray(data?.output) ? data.output : []).filter(item => item?.type === 'message').flatMap(item => Array.isArray(item.content) ? item.content : []).filter(part => part?.type === 'output_text' && typeof part.text === 'string').map(part => part.text).join('')
+      : (Array.isArray(parts) ? parts : []).filter(part => typeof part?.text === 'string' && !part.thought).map(part => part.text).join('')
+    if (!reply.trim()) {
+      externalDiagnostic(provider, 'empty_reply')
+      return res.status(502).json({ error: 'The selected model did not return a text reply.' })
+    }
+    phase = 'write'
     res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    return res.status(200).send(reply.trim().slice(0, 2000))
+    res.statusCode = 200
+    return res.end(reply.trim().slice(0, 2000))
   } catch (error) {
-    if (!res.writableEnded && !res.destroyed) return res.status(error?.name === 'AbortError' ? 504 : 502).json({ error: 'The selected model connection could not answer. Try again.' })
+    const code = error?.cause?.code ?? error?.code
+    const category = disconnected ? 'client_disconnected'
+      : timedOut || error?.name === 'AbortError' ? 'timeout'
+      : phase === 'decode' && error?.name === 'SyntaxError' ? 'invalid_json'
+      : phase === 'fetch' ? 'transport_failure'
+      : phase === 'decode' ? 'response_read_failure'
+      : phase === 'extract' ? 'response_shape_failure'
+      : 'response_write_failure'
+    externalDiagnostic(provider, category, SAFE_TRANSPORT_CODES.has(code) ? { code } : {})
+    if (res.writableEnded || res.destroyed || disconnected) return
+    if (res.headersSent) return res.end()
+    const timeoutFailure = category === 'timeout'
+    return res.status(timeoutFailure ? 504 : 502).json({
+      error: timeoutFailure ? 'The selected model took too long to answer. Try again.'
+        : category === 'invalid_json' || category === 'response_shape_failure' ? 'The selected model returned an unreadable reply.'
+        : 'The selected model connection could not answer. Try again.',
+    })
   } finally {
     clearTimeout(timeout)
     res.off('close', onClose)
