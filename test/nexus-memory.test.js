@@ -71,3 +71,23 @@ test('strict JSON import and restore format',()=>{
  assert.equal(packetDigest({...p,source:'chatgpt'},owner,key),packetDigest({...p,source:'grok'},owner,key))
  assert.notEqual(packetDigest(p,owner,key),packetDigest(p,other,key))
 })
+
+import { mergeRecords, findRecords, handoff, MAX_SELECTED } from '../src/nexus/workbench.js'
+test('private in-session search, relevance, pagination merge and exact reviewed restore bundle',()=>{
+ const a={id:'9007199254740993',createdAt:'2026-11-15T00:00:00Z',source:'chatgpt',sources:['chatgpt','grok'],title:'PennyCore release',state:'ready',context:'deployment',memory:'',nextStep:'verify'}
+ const b={...a,id:'9007199254740994',source:'gemini',sources:['gemini'],title:'Other project',context:'PennyCore deployment'}
+ const c={...a,id:'9007199254740995',title:'Merkabah',context:'art'}
+ assert.deepEqual(mergeRecords([a,b],[{...a,sources:['chatgpt','gemini','grok']},c]).map(x=>x.id),[c.id,b.id,a.id])
+ assert.deepEqual(findRecords([c,b,a],'pennycore deployment').map(x=>x.id),[a.id,b.id])
+ assert.deepEqual(findRecords([c,b,a],'pennycore','grok').map(x=>x.id),[a.id])
+ assert.equal(findRecords([a,b],'nonexistent').length,0)
+ const text=handoff([a,b])
+ assert.match(text,/Source: chatgpt, grok/)
+ assert.match(text,/untrusted reference/)
+ assert.ok(!text.includes(a.id))
+ const jsons=text.match(/\{[\s\S]*?\n\}/g)
+ assert.deepEqual(importMegaSeed(jsons[0]),{title:a.title,state:a.state,context:a.context,memory:a.memory,nextStep:a.nextStep})
+ assert.throws(()=>handoff([]))
+ assert.throws(()=>handoff(Array(MAX_SELECTED+1).fill(a)))
+ assert.throws(()=>handoff(Array(6).fill({...a,state:'s'.repeat(2000),context:'c'.repeat(4000),memory:'m'.repeat(4000),nextStep:'n'.repeat(2000)})))
+})

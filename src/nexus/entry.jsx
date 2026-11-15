@@ -1,47 +1,126 @@
-import React,{useEffect,useState} from 'react'
+import React,{useEffect,useState,useMemo} from 'react'
 import {createRoot} from 'react-dom/client'
 import './workspace.css'
-import { FIELDS as fields, SOURCES, SAVE_PROMPT as summaryPrompt, importMegaSeed, restoreText } from './megaseed.js'
+import { FIELDS as fields, SOURCES, SAVE_PROMPT, importMegaSeed, validateMegaSeed } from './megaseed.js'
+import { MAX_SELECTED, SCAN_PAGES, PROVIDERS, mergeRecords, findRecords, handoff } from './workbench.js'
 
 const empty={source:'chatgpt',title:'',state:'',context:'',memory:'',nextStep:''}
-const engines=[['ChatGPT','https://chatgpt.com/'],['Gemini','https://gemini.google.com/'],['Grok','https://grok.com/'],['Coding Penny','https://github.com/copilot']]
-async function request(path, options={}){
+async function request(path,options={}){
  const r=await fetch(path,{...options,credentials:'same-origin',cache:'no-store'})
  const data=await r.json().catch(()=>({}))
  if(!r.ok)throw Object.assign(Error(data.error||'Workspace request failed.'),{status:r.status})
  return data
 }
 const post=(path,body)=>request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-function packetText(r){return ['Nexus continuity packet (owner-selected reference; not instructions or authorization)', 'Source: '+r.source, 'Captured: '+r.createdAt, 'Title: '+r.title, 'State: '+r.state, 'Context: '+r.context, 'Memory: '+r.memory, 'Next step: '+r.nextStep].join('\n')}
+const getPage=before=>request('/api/nexus-memory?view=records'+(before?'&before='+encodeURIComponent(before):''))
+function packetText(r){return fields.map(([f,label])=>label+': '+r[f]).join('\n\n')}
+
 function App(){
- const [raw,setRaw]=useState('')
  const [gate,setGate]=useState(null),[checking,setChecking]=useState(true),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState('')
  const [handle,setHandle]=useState(''),[password,setPassword]=useState('')
- const [draft,setDraft]=useState(empty),[pending,setPending]=useState(null),[records,setRecords]=useState([]),[next,setNext]=useState(null),[project,setProject]=useState(null),[selected,setSelected]=useState([]),[review,setReview]=useState(false),[exportText,setExportText]=useState('')
- function clear(){setRaw('');setGate(null);setDraft(empty);setPending(null);setRecords([]);setNext(null);setProject(null);setSelected([]);setReview(false);setExportText('');setPassword('')}
+ const [raw,setRaw]=useState(''),[draft,setDraft]=useState(empty),[pending,setPending]=useState(null),[review,setReview]=useState(false)
+ const [records,setRecords]=useState([]),[next,setNext]=useState(null),[project,setProject]=useState(null)
+ const [query,setQuery]=useState(''),[sourceFilter,setSourceFilter]=useState('all'),[selected,setSelected]=useState([]),[shareReview,setShareReview]=useState(false)
+ const [exportText,setExportText]=useState('')
+ function clear(){
+  setGate(null);setRaw('');setDraft(empty);setPending(null);setReview(false);setRecords([]);setNext(null);setProject(null);setQuery('');setSourceFilter('all');setSelected([]);setShareReview(false);setExportText('');setPassword('');setNotice('')
+ }
  function fail(e){if([401,403].includes(e.status))clear();setError(e.message)}
- async function check(){try{setGate(await request('/api/nexus-memory?view=status'))}catch(e){clear();if(e.status!==401)setError(e.message)}finally{setChecking(false)}}
+ function invalidateShare(){setShareReview(false);setExportText('')}
+ async function check(){
+  try{
+   const status=await request('/api/nexus-memory?view=status')
+   if(status.memoryReady){
+    try{const page=await getPage(null);setRecords(page.records);setNext(page.nextBefore)}
+    catch(e){if([401,403].includes(e.status))throw e;setError(e.message)}
+   }
+   setGate(status)
+  }catch(e){clear();if(e.status!==401)setError(e.message)}finally{setChecking(false)}
+ }
  useEffect(()=>{check();const handler=e=>{if(e.persisted)window.location.reload()};window.addEventListener('pageshow',handler);return()=>window.removeEventListener('pageshow',handler)},[])
  async function login(e){e.preventDefault();setBusy(true);setError('');try{await post('/api/auth/login',{handle,password});setPassword('');await check()}catch(e){fail(e)}finally{setBusy(false)}}
  async function logout(){setBusy(true);setError('');try{await post('/api/auth/logout',{});clear();setHandle('');setNotice('Signed out.')}catch(e){clear();setError('Local workspace cleared. Server sign-out not confirmed; close this browser and retry sign-out.')}finally{setBusy(false)}}
- async function load(before=null){const q='/api/nexus-memory?view=records'+(before?'&before='+encodeURIComponent(before):'');const r=await request(q);setRecords(old=>before?[...old,...r.records.filter(x=>!old.some(y=>y.id===x.id))]:r.records);setNext(r.nextBefore)}
- async function refresh(){setBusy(true);setError('');try{await load();setNotice('Saved captures refreshed.')}catch(e){fail(e)}finally{setBusy(false)}}
- async function capture(e){e.preventDefault();if(!review||busy||!gate?.memoryReady)return;const p=pending||{requestId:crypto.randomUUID(),...draft};setPending(p);setBusy(true);setError('');try{const r=await post('/api/nexus-memory',p);setRecords(old=>[r.record,...old.filter(x=>x.id!==r.record.id)]);setPending(null);setDraft(empty);setReview(false);setRaw('');setNotice(r.duplicate?'Identical MegaSeed already saved. Source receipt recorded.':'Capture saved to encrypted cloud memory.')}catch(e){fail(e)}finally{setBusy(false)}}
- async function loadProject(){setBusy(true);setError('');try{setProject((await request('/api/penny-owner?view=records')).records)}catch(e){fail(e)}finally{setBusy(false)}}
- function importPacket(){setError('');setNotice('');setReview(false);setPending(null);try{const p=importMegaSeed(raw);setDraft(d=>({...p,source:d.source}));setNotice('MegaSeed validated. Review the fields and select its source before saving.')}catch(e){setError(e.message)}}
+ async function refresh(){
+  setBusy(true);setError('');invalidateShare()
+  try{const page=await getPage(null);setRecords(page.records);setNext(page.nextBefore);setSelected([]);setNotice('Latest memories loaded.')}
+  catch(e){fail(e)}finally{setBusy(false)}
+ }
+ async function loadOlder(pages=1){
+  if(!next||busy)return
+  setBusy(true);setError('');invalidateShare()
+  try{
+   let cursor=next,count=0
+   for(let i=0;i<pages&&cursor;i++){
+    const page=await getPage(cursor)
+    if(page.nextBefore===cursor)throw Error('Memory cursor did not advance.')
+    setRecords(old=>mergeRecords(old,page.records));setNext(page.nextBefore);cursor=page.nextBefore;count+=page.records.length
+   }
+   setNotice(count+' older memories loaded. '+(cursor?'More are available.':'All available pages are loaded.'))
+  }catch(e){fail(e)}finally{setBusy(false)}
+ }
  function update(k,v){setDraft(d=>({...d,[k]:v}));setPending(null);setReview(false)}
- async function copy(value){setExportText(value);try{await navigator.clipboard.writeText(value);setNotice('Copied. Review before pasting into another AI service.')}catch{setNotice('Select and copy the text in the export box below.')}}
- const chosen=records.filter(r=>selected.includes(r.id))
+ function changeRaw(value){setRaw(value);setReview(false);setPending(null)}
+ function importPacket(value=raw){
+  setError('');setNotice('');setReview(false);setPending(null)
+  try{const p=importMegaSeed(value);setDraft(d=>({...p,source:d.source}));setRaw('');setNotice('MegaSeed validated and imported. Confirm its source and review before saving.')}
+  catch(e){setRaw(typeof value==='string'?value.slice(0,100000):'');setError(e.message)}
+ }
+ async function pasteClipboard(){
+  setBusy(true);setError('')
+  try{const value=await navigator.clipboard.readText();importPacket(value)}
+  catch{setNotice('Clipboard access unavailable. Paste into the JSON box instead.')}
+  finally{setBusy(false)}
+ }
+ async function capture(e){
+  e.preventDefault();if(!review||busy||!gate?.memoryReady||raw.trim())return
+  let p
+  try{const fieldsOnly=Object.fromEntries(fields.map(([k])=>[k,draft[k]]));p=pending||{requestId:crypto.randomUUID(),source:draft.source,...validateMegaSeed(fieldsOnly)}}
+  catch(e){setError(e.message);return}
+  setPending(p);setBusy(true);setError('')
+  try{
+   const r=await post('/api/nexus-memory',p)
+   setRecords(old=>mergeRecords(old,[r.record]));setPending(null);setDraft({...empty,source:draft.source});setReview(false);setRaw('');invalidateShare()
+   setNotice(r.duplicate?'Identical MegaSeed already saved. Source receipt recorded.':'Capture saved to encrypted cloud memory.')
+  }catch(e){fail(e)}finally{setBusy(false)}
+ }
+ async function loadProject(){setBusy(true);setError('');try{setProject((await request('/api/penny-owner?view=records')).records)}catch(e){fail(e)}finally{setBusy(false)}}
+ async function copy(value){
+  setExportText(value)
+  try{await navigator.clipboard.writeText(value);setNotice('Copied. Paste only into the intended provider.')}
+  catch{setNotice('Clipboard unavailable. Select and copy the text in the preview.')}
+ }
+ const matching=useMemo(()=>findRecords(records,query,sourceFilter),[records,query,sourceFilter])
+ const chosen=useMemo(()=>selected.map(id=>records.find(r=>r.id===id)).filter(Boolean),[records,selected])
+ const bundle=useMemo(()=>{try{return {text:chosen.length?handoff(chosen):'',error:''}}catch(e){return {text:'',error:e.message}}},[chosen])
+ function toggle(id,checked){invalidateShare();setSelected(old=>checked?(old.length<MAX_SELECTED&&!old.includes(id)?[...old,id]:old):old.filter(x=>x!==id))}
+ function suggest(){invalidateShare();setSelected(matching.slice(0,Math.min(3,MAX_SELECTED)).map(r=>r.id));setNotice('Selected up to three matching memories. Review before sharing.')}
+ function launch(url){
+  if(!shareReview||!bundle.text||busy)return
+  // The reviewed text stays in the clipboard; never include it in a URL.
+  void copy(bundle.text)
+  window.open(url,'_blank','noopener,noreferrer')
+ }
  return <main className="nx-shell">
- <header><a href="https://nexus.wildcarddev.com/">♠ THE N€XU$</a><span>{gate?'OWNER WORKSPACE':'PRIVATE ENTRY'}</span></header>
+ <header><a href="https://nexus.wildcarddev.com/">♠ THE N€XU$</a><span>{gate?'OWNER WORKSPACE · MARK II':'PRIVATE ENTRY'}</span></header>
  {error&&<p role="alert" className="nx-error">{error}</p>}{notice&&<p role="status">{notice}</p>}
  {checking?<p role="status">Verifying your session…</p>:!gate?<section className="nx-panel"><h1>Operator Gate</h1><p>Sign in with your existing WildCard Party account. Only the verified owner account can enter.</p><form onSubmit={login}><label>Handle<input required autoComplete="username" value={handle} onChange={e=>setHandle(e.target.value)}/></label><label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button disabled={busy}>Sign in</button></form><button type="button" onClick={logout} disabled={busy}>Sign out of existing session</button></section>:<>
- <section className="nx-panel"><div className="nx-row"><h1>Private command center</h1><button type="button" onClick={logout} disabled={busy}>Sign out</button></div><p>Your owner identity has been verified. Launch your own provider accounts; this workspace makes no model inference calls and does not transfer credentials.</p><div className="nx-grid">{engines.map(([name,url])=><a key={name} className="nx-link" href={url}>{name} ↗</a>)}</div><p className="nx-muted">Grok native account access only; API integration remains paused. Ollama and local histories stay on your workstation. Provider plans and usage limits apply.</p></section>
- <section className="nx-panel"><h2>Approved project memory</h2><p>Read-only engineering records, separate from your personal captures.</p><button type="button" onClick={loadProject} disabled={busy||!gate.projectReady}>Load approved records</button>{!gate.projectReady&&<p>Project memory is not configured.</p>}{project?.map(r=><details key={r.kind+'/'+r.key}><summary>{r.kind}/{r.key}</summary><pre>{r.available?JSON.stringify(r.payload,null,2):'No record available.'}</pre></details>)}</section>
- <section className="nx-panel"><h2>Capture continuity</h2><p>Ask any provider to summarize a conversation, review the result, and save the state, context, memory and next action here. No automatic collection or provider transfer occurs. Source is your attribution, not independently verified provider identity.</p><button type="button" onClick={()=>copy(summaryPrompt)}>Copy summary prompt</button>
- <div className="nx-import"><label htmlFor="nx-megaseed">Paste MegaSeed JSON</label><textarea id="nx-megaseed" rows="7" value={raw} maxLength={100000} disabled={busy} onChange={e=>{setRaw(e.target.value);setReview(false);setPending(null)}} placeholder='Paste the five-field JSON here'/><button type="button" disabled={busy||!raw.trim()} onClick={importPacket}>Validate and import</button></div>
- {!gate.memoryReady&&<p className="nx-muted">Encrypted cloud memory is awaiting secure database activation. You can validate and review a capture now, but cannot save it yet.</p>}<form onSubmit={capture}><label>Source<select value={draft.source} onChange={e=>update('source',e.target.value)} disabled={busy}>{SOURCES.map(x=><option key={x} value={x}>{x}</option>)}</select></label>{fields.map(([k,label,max])=><label key={k}>{label}{k==='title'?<input required maxLength={max} value={draft[k]} onChange={e=>update(k,e.target.value)} disabled={busy}/>:<textarea rows="3" maxLength={max} value={draft[k]} onChange={e=>update(k,e.target.value)} disabled={busy}/>}</label>)}<label className="nx-check"><input type="checkbox" checked={review} onChange={e=>setReview(e.target.checked)} disabled={busy}/> I reviewed this capture and removed secrets. Save it to my private cloud memory.</label><button disabled={busy||!gate.memoryReady||!review||!draft.title.trim()}>Save capture</button></form><p className="nx-muted">Encrypted at rest using a server-managed key. Not end-to-end encrypted. Do not save passwords or confidential third-party material.</p>{gate.memoryReady&&<><div className="nx-row"><h2>Saved captures</h2><button disabled={busy} onClick={refresh}>Load / refresh</button></div>{records.map(r=><article className="nx-record" key={r.id}><label className="nx-check"><input type="checkbox" checked={selected.includes(r.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,r.id]:old.filter(id=>id!==r.id))}/> Include in next handoff</label><h3>{r.title}</h3><p>{(r.sources||[r.source]).join(' / ')} · {new Date(r.createdAt).toLocaleString()}</p><details><summary>Review capture</summary><pre>{packetText(r)}</pre></details></article>)}{next&&<button disabled={busy} onClick={async()=>{setBusy(true);try{await load(next)}catch(e){fail(e)}finally{setBusy(false)}}}>Load older captures</button>}<button disabled={!chosen.length||busy} onClick={()=>copy(restoreText(chosen))}>Copy selected restore points</button></>}</section>
- {exportText&&<section className="nx-panel"><h2>Review / export</h2><p>Nothing is sent automatically. Copy only the context you approve for the destination provider.</p><textarea aria-label="Export text" readOnly rows="8" value={exportText}/><button onClick={()=>setExportText('')}>Clear export</button></section>}
+ <section className="nx-panel"><div className="nx-row"><h1>Private command center</h1><button type="button" onClick={logout} disabled={busy}>Sign out</button></div><p>Your owner identity has been verified. Launch your own provider accounts; this workspace makes no model inference calls and does not transfer credentials.</p><div className="nx-grid">{PROVIDERS.map(([id,name,url])=><a key={id} className="nx-link" href={url} target="_blank" rel="noopener noreferrer">{name} ↗</a>)}</div><p className="nx-muted">Native provider accounts only. Ollama remains local. Provider plans and usage limits apply.</p></section>
+ <section className="nx-panel"><h2>Capture continuity</h2><p>Use Penny, save point in any engine. Import the JSON, confirm source and review before saving. Source is your attribution, not independently verified provider identity.</p>
+ <div className="nx-actions"><button type="button" disabled={busy} onClick={()=>copy(SAVE_PROMPT)}>Copy save-point command</button><button type="button" disabled={busy} onClick={pasteClipboard}>Paste & validate clipboard</button></div>
+ <div className="nx-import"><label htmlFor="nx-megaseed">Paste MegaSeed JSON</label><textarea id="nx-megaseed" rows="5" value={raw} maxLength={100000} disabled={busy} onChange={e=>changeRaw(e.target.value)} onPaste={e=>{const value=e.clipboardData.getData('text');if(value){e.preventDefault();importPacket(value)}}} placeholder="Paste one five-field JSON packet"/><div className="nx-actions"><button type="button" disabled={busy||!raw.trim()} onClick={()=>importPacket()}>Validate and import</button><button type="button" disabled={busy||!raw} onClick={()=>changeRaw('')}>Clear unimported text</button></div></div>
+ {!gate.memoryReady&&<p className="nx-muted">Encrypted memory is unavailable. You can validate and review, but cannot save yet.</p>}
+ <form onSubmit={capture}><label>Source<select value={draft.source} onChange={e=>update('source',e.target.value)} disabled={busy}>{SOURCES.map(x=><option key={x} value={x}>{x}</option>)}</select></label>{fields.map(([k,label,max])=><label key={k}>{label}{k==='title'?<input required maxLength={max} value={draft[k]} onChange={e=>update(k,e.target.value)} disabled={busy}/>:<textarea rows="3" maxLength={max} value={draft[k]} onChange={e=>update(k,e.target.value)} disabled={busy}/>}</label>)}<label className="nx-check"><input type="checkbox" checked={review} onChange={e=>setReview(e.target.checked)} disabled={busy||!!raw.trim()}/> I reviewed this capture and removed secrets. Save it to my private cloud memory.</label><button disabled={busy||!gate.memoryReady||!review||!draft.title.trim()||!!raw.trim()}>Save capture</button></form><p className="nx-muted">Encrypted at rest with a server-managed key, not end-to-end encryption. Never save passwords or confidential third-party material.</p></section>
+ {gate.memoryReady&&<section className="nx-panel"><div className="nx-row"><h2>Memory bank</h2><button type="button" disabled={busy} onClick={refresh}>Refresh latest</button></div>
+ <p className="nx-muted">{records.length} loaded · {matching.length} matching · {selected.length}/{MAX_SELECTED} selected. Search runs only in this browser over loaded records. {next?'More pages available.':'No more pages indicated.'}</p>
+ <div className="nx-filters"><label>Find a project or topic<input value={query} maxLength={240} onChange={e=>setQuery(e.target.value)} placeholder="e.g. PennyCore, Merkabah, deployment" disabled={busy}/></label><label>Source<select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} disabled={busy}><option value="all">All providers</option>{SOURCES.map(s=><option key={s} value={s}>{s}</option>)}</select></label></div>
+ <div className="nx-actions"><button type="button" disabled={busy||!matching.length} onClick={suggest}>Suggest up to 3 matches</button><button type="button" disabled={busy||!selected.length} onClick={()=>{invalidateShare();setSelected([])}}>Clear selection</button>{next&&<button type="button" disabled={busy} onClick={()=>loadOlder(SCAN_PAGES)}>Load up to 100 older memories</button>}</div>
+ {!matching.length&&<p>No matching loaded memories. {next?'Load older pages to search further.':''}</p>}
+ {matching.map(r=><article className="nx-record" key={r.id}><label className="nx-check"><input type="checkbox" checked={selected.includes(r.id)} disabled={busy||(!selected.includes(r.id)&&selected.length>=MAX_SELECTED)} onChange={e=>toggle(r.id,e.target.checked)}/> Include in next handoff</label><h3>{r.title}</h3><p>{(r.sources||[r.source]).join(' / ')} · {new Date(r.createdAt).toLocaleString()}</p><details><summary>Review capture</summary><pre>{packetText(r)}</pre></details></article>)}
+ {next&&<button type="button" disabled={busy} onClick={()=>loadOlder()}>Load next page</button>}
+ </section>}
+ {chosen.length>0&&<section className="nx-panel"><h2>Restore bundle</h2><p>{chosen.length} selected. Only these memories will be copied. Search suggestions do not authorize transfer.</p><ol>{chosen.map(r=><li key={r.id}>{r.title}</li>)}</ol>{bundle.error?<p role="alert" className="nx-error">{bundle.error}</p>:<><label>Review the exact handoff<textarea readOnly rows="8" value={bundle.text}/></label><label className="nx-check"><input type="checkbox" checked={shareReview} onChange={e=>setShareReview(e.target.checked)} disabled={busy}/> I approve sharing these selected memories with the provider I choose.</label><div className="nx-actions"><button type="button" disabled={busy||!shareReview} onClick={()=>copy(bundle.text)}>Copy restore point</button>{PROVIDERS.map(([id,name,url])=><button key={id} type="button" disabled={busy||!shareReview} onClick={()=>launch(url)}>Copy & open {name}</button>)}</div><p className="nx-muted">The provider opens in a new tab; paste the reviewed text yourself. Nothing is automatically submitted.</p></>}</section>}
+ {exportText&&<section className="nx-panel"><h2>Clipboard fallback</h2><textarea aria-label="Copied text" readOnly rows="6" value={exportText}/><button type="button" onClick={()=>setExportText('')}>Clear preview</button></section>}
+ <section className="nx-panel"><h2>Approved project memory</h2><p>Read-only engineering records, separate from personal captures.</p><button type="button" onClick={loadProject} disabled={busy||!gate.projectReady}>Load approved records</button>{!gate.projectReady&&<p>Project memory is not configured.</p>}{project?.map(r=><details key={r.kind+'/'+r.key}><summary>{r.kind}/{r.key}</summary><pre>{r.available?JSON.stringify(r.payload,null,2):'No record available.'}</pre></details>)}</section>
  </>}
  <footer>WILDCARD DEV · OWNER GATE · Sign out on borrowed devices.</footer></main>
 }
