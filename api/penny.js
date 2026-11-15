@@ -262,6 +262,14 @@ export default async function handler(req, res) {
     })
   }
 
+  // Emergency cost containment: public Grok is disabled regardless of credentials.
+  // Keep the integration for a later explicitly authorized release.
+  if (provider === 'grok') {
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('X-Penny-Provider', 'grok')
+    return res.status(503).json({ error: 'Grok is temporarily disabled. Please use Gemini Penny.' })
+  }
+
   if (provider !== 'openai') return externalReply(provider, messages, res, presentation)
 
   if (!process.env.OPENAI_API_KEY) {

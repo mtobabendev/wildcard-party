@@ -66,13 +66,15 @@ test('external provider transport and response diagnostics are bounded and fail 
       await request(() => { throw new TypeError(secret, { cause: { code: secret } }) })
       latest('transport_failure'); assert.equal(logs.at(-1)[1].code, undefined)
     })
-    await t.test('Grok explicit route still works in synthetic test only', async () => {
-      const res = await request(() => ok({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hello' }] }] }), 'grok')
-      assert.equal(res.statusCode, 200); assert.equal(res.payload, 'Hello')
-      assert.match(requests.at(-1).url, /^https:\/\/api\.x\.ai\//)
+    await t.test('public Grok is disabled even with configured credentials', async () => {
+      const before = requests.length
+      const res = await request(() => { throw new Error('No upstream call allowed') }, 'grok')
+      assert.equal(res.statusCode, 503)
+      assert.match(res.payload.error, /temporarily disabled/)
+      assert.equal(requests.length, before)
     })
-    assert.equal(requests.length, 11)
-    assert.ok(requests.slice(0, -1).every(entry => entry.url.includes('generativelanguage.googleapis.com')))
+    assert.equal(requests.length, 10)
+    assert.ok(requests.every(entry => entry.url.includes('generativelanguage.googleapis.com')))
     assert.ok(!JSON.stringify(logs).includes(secret))
     assert.ok(!JSON.stringify(logs).includes(message))
   } finally {
