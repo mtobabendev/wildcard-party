@@ -103,3 +103,14 @@ test('continuity popup only accepts exact local origin, opener, transaction and 
  assert.throws(()=>restoreRecord({...packet,id:'1',source:'ollama',sources:['gemini'],createdAt:'2026-11-16'}))
  assert.equal(restoreRecord({...packet,id:'1',source:'ollama',sources:['ollama'],createdAt:'2026-11-16'}).title,'Fictional')
 })
+
+import {restoreBundle,acceptBridgeMessage} from '../src/nexus/bridge.js'
+test('multi-select bundle, duplicate and size guards, and verified local acknowledgement',()=>{
+ const p={title:'Fictional',state:'Synthetic only',context:'',memory:'',nextStep:'',source:'ollama',sources:['ollama'],createdAt:'2026-11-16'}
+ const rows=[{...p,id:'1'},{...p,id:'2'}]
+ assert.equal(restoreBundle(rows).length,2);assert.throws(()=>restoreBundle([rows[0],rows[0]]));assert.throws(()=>restoreBundle([]));assert.throws(()=>restoreBundle(Array.from({length:7},(_,i)=>({...p,id:String(i+1)}))))
+ const id='11111111-1111-4111-8111-111111111111',origin='http://127.0.0.1:5173',opener={},cfg={id,origin,mode:'restore'},data={type:'nexus:continuity:ack:v2',id,ok:true,sessionId:id,count:2}
+ assert.equal(acceptBridgeMessage(cfg,{source:opener,origin,data},opener).count,2)
+ assert.equal(acceptBridgeMessage(cfg,{source:{},origin,data},opener),null)
+ assert.equal(acceptBridgeMessage(cfg,{source:opener,origin,data:{...data,count:0}},opener),null)
+})

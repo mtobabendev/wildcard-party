@@ -17,3 +17,22 @@ export function restoreRecord(r){
  if(!r||typeof r.id!=='string'||!/^[1-9][0-9]{0,18}$/.test(r.id)||!SOURCES.includes(r.source)||!Array.isArray(r.sources)||!r.sources.includes(r.source)||r.sources.some(s=>!SOURCES.includes(s))||Number.isNaN(new Date(r.createdAt).valueOf()))throw Error('Invalid memory receipt.')
  return {id:r.id,source:r.source,sources:[...r.sources],createdAt:new Date(r.createdAt).toISOString(),...validateMegaSeed(Object.fromEntries(FIELDS.map(([f])=>[f,r[f]])))}
 }
+
+export function restoreBundle(records){
+ if(!Array.isArray(records)||records.length<1||records.length>6)throw Error('Select between one and six memories.')
+ const result=records.map(restoreRecord)
+ if(new Set(result.map(r=>r.id)).size!==result.length)throw Error('Duplicate memory selection.')
+ if(new TextEncoder().encode(JSON.stringify(result)).length>48000)throw Error('Selected memories exceed the 48 KB bundle limit. Select fewer records.')
+ return result
+}
+export function acceptBridgeMessage(config,event,opener){
+ if(!config||!opener||event.source!==opener||event.origin!==config.origin||event.data?.id!==config.id)return null
+ const data=event.data
+ if(data.type==='nexus:continuity:hello:v2'&&data.mode===config.mode)return {type:'hello'}
+ if(config.mode==='restore'&&data.type==='nexus:continuity:ack:v2'&&typeof data.ok==='boolean'){
+  if(data.ok&&typeof data.sessionId==='string'&&bridgeId(data.sessionId)&&Number.isInteger(data.count)&&data.count>=1&&data.count<=6)return {type:'ack',ok:true,sessionId:data.sessionId,count:data.count}
+  if(!data.ok)return {type:'ack',ok:false}
+ }
+ if(config.mode==='save'){const draft=acceptDraft(config,event,opener);if(draft)return {type:'draft',draft}}
+ return null
+}
