@@ -91,3 +91,13 @@ test('Basic and public clients, expiration, CSRF and disconnect',async()=>{
  const c=(await f.reg()).body,{code}=await f.consent(c);f.rows.at(-1).expired=true
  assert.equal((await f.req('token',f.form(f.tokenForm(c,code)))).code,400)
 })
+
+test('Gemini long opaque OAuth state is accepted and echoed exactly, oversized state rejected',async()=>{
+ const f=fixture(),c=(await f.reg()).body
+ const state='s'.repeat(1111)
+ const a=await f.req('authorize',{query:{...f.authQuery(c),state},account:owner});assert.equal(a.code,200)
+ const nonce=/name="nonce" value="([^"]+)"/.exec(a.body)[1]
+ const r=await f.req('authorize',f.form({nonce,decision:'allow'},owner));assert.equal(r.code,303)
+ assert.equal(new URL(r.headers.Location).searchParams.get('state'),state)
+ assert.equal((await f.req('authorize',{query:{...f.authQuery(c),state:'s'.repeat(4097)},account:owner})).code,400)
+})
