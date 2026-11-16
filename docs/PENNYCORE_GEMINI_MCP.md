@@ -35,3 +35,7 @@ Live authorization request inspection confirmed the expected client, exact callb
 ## Public demo retirement
 
 Owner requested retiring the original unauthenticated fixture to eliminate misleading Gemini fallback. `/api/pennycore-mcp-demo-v1` now returns 410 for all methods. The separate authenticated synthetic endpoint is unchanged. Private multi-engine Owner tools are not public concierge routes.
+
+### Browser consent form compatibility
+
+Production request metadata confirmed successful authorization GET (200) followed by consent POST (403) on two separate attempts. Native HTML form submissions under `Referrer-Policy: no-referrer` serialize Origin as `null`, conflicting with our exact same-origin POST guard. Consent/disconnect HTML now uses `strict-origin` (only origin, no path or query). All other OAuth responses retain `no-referrer`; the same-origin requirement, nonce, Owner session, exact callback, PKCE and anti-framing checks remain enforced. Null and foreign Origin are still rejected. No real memory access is enabled.

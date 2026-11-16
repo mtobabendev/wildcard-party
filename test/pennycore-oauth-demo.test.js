@@ -101,3 +101,21 @@ test('Gemini long opaque OAuth state is accepted and echoed exactly, oversized s
  assert.equal(new URL(r.headers.Location).searchParams.get('state'),state)
  assert.equal((await f.req('authorize',{query:{...f.authQuery(c),state:'s'.repeat(4097)},account:owner})).code,400)
 })
+
+test('consent and disconnect HTML preserve browser POST Origin without leaking URL state',async()=>{
+ const f=fixture(),c=(await f.reg()).body
+ const a=await f.req('authorize',{query:f.authQuery(c),account:owner});assert.equal(a.code,200)
+ assert.equal(a.headers['Referrer-Policy'],'strict-origin')
+ assert.match(a.headers['Content-Security-Policy'],/form-action 'self'/)
+ assert.match(a.headers['Content-Security-Policy'],/frame-ancestors 'none'/)
+ assert.equal(a.headers['X-Frame-Options'],'DENY')
+ const nonce=/name="nonce" value="([^"]+)"/.exec(a.body)[1]
+ for(const origin of ['null','https://evil.example',''])assert.equal((await f.req('authorize',f.form({nonce,decision:'allow'},owner,origin))).code,403)
+ assert.equal(f.rows[0].used,false)
+ const r=await f.req('authorize',f.form({nonce,decision:'allow'},owner));assert.equal(r.code,303)
+ assert.equal(r.headers['Referrer-Policy'],'no-referrer')
+ assert.equal(new URL(r.headers.Location).searchParams.get('state'),'synthetic-state')
+ const d=await f.req('disconnect',{account:owner});assert.equal(d.code,200);assert.equal(d.headers['Referrer-Policy'],'strict-origin')
+ assert.equal((await f.req('disconnect',f.form({confirm:'revoke'},owner,'null'))).code,403)
+ assert.equal((await f.req('disconnect',f.form({confirm:'revoke'},owner))).code,200)
+})
