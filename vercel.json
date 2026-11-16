@@ -74,6 +74,10 @@
     {
       "source": "/api/pennycore-auth-demo/disconnect",
       "destination": "/api/pennycore-auth-demo?action=disconnect"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/register",
+      "destination": "/api/pennycore-auth-demo?action=register"
     }
   ]
 }
