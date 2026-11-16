@@ -77,3 +77,15 @@ test('expired and owner-disconnected grants cannot be used',async()=>{
  assert.equal((await f.req('disconnect',f.form({confirm:'revoke'},owner))).code,200)
  assert.equal((await f.rpc(t.body.access_token)).code,401)
 })
+
+test('production discovery before activation is public metadata only; no consent or storage',async()=>{
+ const f=fixture({PENNYCORE_MCP_DEMO_ENABLED:'0'})
+ const resource=await f.req('resource');assert.equal(resource.code,200);assert.equal(resource.body.resource,RESOURCE)
+ const metadata=await f.req('metadata');assert.equal(metadata.code,200);assert.equal(metadata.body.issuer,RESOURCE)
+ const r=await f.rpc('a'.repeat(43));assert.equal(r.code,401);assert.match(r.headers['WWW-Authenticate'],/resource_metadata/)
+ assert.equal((await f.req('authorize',{query:f.authQuery,account:owner})).code,503)
+ assert.equal((await f.req('token',f.form(f.tokenForm('a'.repeat(43))))).code,503)
+ assert.equal(f.calls.length,0);assert.equal(f.rows.length,0)
+ assert.equal(config({...env,NEXUS_MEMORY_DATABASE_URL:env.PENNYCORE_MCP_DEMO_DB_URL}),null)
+ assert.equal(config({...env,DATABASE_URL:env.PENNYCORE_MCP_DEMO_DB_URL}),null)
+})
