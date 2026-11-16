@@ -16,7 +16,7 @@ const post=(path,body)=>request(path,{method:'POST',headers:{'Content-Type':'app
 const getPage=before=>request('/api/nexus-memory?view=records'+(before?'&before='+encodeURIComponent(before):''))
 const packetText=r=>fields.map(([f,label])=>label+': '+r[f]).join('\n\n')
 function App(){
- const [bridge]=useState(()=>bridgeConfig(location.search)),[tab,setTab]=useState(bridge?.mode==='save'?'save':'memory')
+ const [bridge]=useState(()=>bridgeConfig(location.search)),[tab,setTab]=useState(bridge?.mode==='pair'?'pair':bridge?.mode==='save'?'save':'memory')
  const [bridgeReceived,setBridgeReceived]=useState(false),[bridgeReady,setBridgeReady]=useState(false),[bridgeDone,setBridgeDone]=useState(false),[sending,setSending]=useState(false)
  const [gate,setGate]=useState(null),[checking,setChecking]=useState(true),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState('')
  const [handle,setHandle]=useState(''),[password,setPassword]=useState('')
@@ -46,6 +46,7 @@ function App(){
    try{
     const m=acceptBridgeMessage(bridge,e,opener);if(!m)return
     if(m.type==='hello'){setBridgeReady(true);return}
+    if(m.type==='device-ack'){clearTimeout(ackTimer.current);setSending(false);if(m.ok){setBridgeDone(true);setNotice('Workstation connected. Automatic local continuity is enabled.');setError('')}else setError('Local enrollment was not confirmed. Close and retry from Nexus.');return}
     if(m.type==='draft'&&!receivedDraft.current){receivedDraft.current=true;setBridgeReceived(true);setBridgeReady(true);setDraft(m.draft);setPending(null);setReview(false);setRaw('');setNotice('Draft received. Review and save.');return}
     if(m.type==='ack'&&delivery.current){
      clearTimeout(ackTimer.current);setSending(false)
@@ -95,15 +96,25 @@ function App(){
   try{window.opener.postMessage({type:'nexus:continuity:restore:v2',id:bridge.id,records:delivery.current},bridge.origin);setNotice('Restoring to encrypted local storage…');clearTimeout(ackTimer.current);ackTimer.current=setTimeout(()=>{setSending(false);setError('No local storage receipt arrived. Retry the same restore, or close and reopen from Nexus.')},15000)}
   catch{setSending(false);setError('Could not reach the local Nexus. Retry or reopen the restore window.')}
  }
+ async function pairDevice(){
+  if(bridge?.mode!=='pair'||!bridgeReady||!shareReview||sending||bridgeDone||!window.opener||window.opener.closed)return
+  setSending(true);setError('')
+  try{const result=await post('/api/nexus-device?action=pair',{deviceId:bridge.id,approved:true})
+   if(typeof result.grant!=='string'||!Number.isSafeInteger(result.expires))throw Error('Invalid enrollment response.')
+   window.opener.postMessage({type:'nexus:device:grant:v1',id:bridge.id,grant:result.grant,expires:result.expires},bridge.origin)
+   setNotice('Connecting workstation…');clearTimeout(ackTimer.current);ackTimer.current=setTimeout(()=>{setSending(false);setError('Workstation did not confirm enrollment. Retry or close.')},20000)
+  }catch(e){setSending(false);fail(e)}
+ }
  function closeBridge(){window.close();setNotice('Return to your local Nexus.')}
  return <main className="nx-shell nx-workspace">
  <header><a href="https://nexus.wildcarddev.com/">♠ THE N€XU$</a><span>{gate?'OWNER WORKSPACE · MARK III':'PRIVATE ENTRY'}</span>{gate&&<button type="button" disabled={busy||sending} onClick={logout}>Sign out</button>}</header>
  <div className="nx-status" aria-live="polite">{error&&<p role="alert" className="nx-error">{error}</p>}{notice&&<p role="status">{notice}</p>}</div>
  {checking?<p role="status">Verifying your session…</p>:!gate?<section className="nx-panel"><h1>Operator Gate</h1><p>Sign in with your existing WildCard Party account.</p><form onSubmit={login}><label>Handle<input required autoComplete="username" value={handle} onChange={e=>setHandle(e.target.value)}/></label><label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button disabled={busy}>Sign in</button></form></section>:<>
- <section className="nx-panel nx-task"><div className="nx-row"><div><h1>{bridge?.mode==='restore'?'Restore memories':bridge?.mode==='save'?'Save point':'PennyCore command center'}</h1><p>{bridge?bridgeDone?'Transaction confirmed.':bridgeReady?'Local Nexus connected. No external engine receives this data.':'Waiting for local Nexus connection…':'Your encrypted memory bank. Choose a task.'}</p></div>{bridge&&<button type="button" onClick={closeBridge}>{bridgeDone?'Return to Nexus':'Cancel / close'}</button>}</div>
+ <section className="nx-panel nx-task"><div className="nx-row"><div><h1>{bridge?.mode==='restore'?'Restore memories':bridge?.mode==='save'?'Save point':bridge?.mode==='pair'?'Connect this workstation':'PennyCore command center'}</h1><p>{bridge?bridgeDone?'Transaction confirmed.':bridgeReady?'Local Nexus connected. No external engine receives this data.':'Waiting for local Nexus connection…':'Your encrypted memory bank. Choose a task.'}</p></div>{bridge&&<button type="button" onClick={closeBridge}>{bridgeDone?'Return to Nexus':'Cancel / close'}</button>}</div>
  {!bridge&&<nav className="nx-tabs" aria-label="Workspace tasks">{[['memory','Memory bank / Restore'],['save','Save / Import'],['engines','Engines'],['project','Project records']].map(([key,label])=><button key={key} aria-pressed={tab===key} disabled={busy} onClick={()=>{setTab(key);setError('');setNotice('')}}>{label}</button>)}</nav>}
  </section>
  {bridgeDone?<section className="nx-panel"><h2>Complete</h2><p>{notice||'Your transaction has finished.'}</p><button type="button" onClick={closeBridge}>Return to local Nexus</button></section>:<>
+ {tab==='pair'&&<section className="nx-panel"><h2>One-time workstation approval</h2><p>Allow the private local Nexus to read your encrypted journal and append routine checkpoints. No memory is sent to external AI providers. This permission expires with this WildCard login (at most 30 days). Signing out of this browser session revokes the grant. You can disconnect locally at any time.</p><label className="nx-check"><input type="checkbox" checked={shareReview} disabled={sending} onChange={e=>setShareReview(e.target.checked)}/> Allow automatic retrieval and first-party checkpoint synchronization on this workstation.</label><button className="nx-primary" disabled={!bridgeReady||!shareReview||sending||!gate.memoryReady} onClick={pairDevice}>{sending?'Connecting…':'Connect workstation'}</button></section>}
  {tab==='memory'&&<section className="nx-panel"><div className="nx-row"><h2>Memory bank</h2><button type="button" disabled={locked} onClick={refresh}>Refresh</button></div>
  {!gate.memoryReady?<p>Encrypted memory is unavailable.</p>:<>
  <div className="nx-filters"><label>Search memories<input value={query} maxLength={240} onChange={e=>setQuery(e.target.value)} placeholder="Find a topic or project" disabled={locked}/></label><label>Source<select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} disabled={locked}><option value="all">All providers</option>{SOURCES.map(s=><option key={s} value={s}>{s}</option>)}</select></label></div>

@@ -4,7 +4,7 @@ export const BRIDGE_ORIGINS=['http://127.0.0.1:5173','http://localhost:5173']
 export const bridgeId=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
 export function bridgeConfig(search){
  const q=new URLSearchParams(search),mode=q.get('bridge'),origin=q.get('local'),id=q.get('id')
- if(!['save','restore'].includes(mode)||!BRIDGE_ORIGINS.includes(origin)||!bridgeId(id)||[...q.keys()].length!==3)return null
+ if(!['save','restore','pair'].includes(mode)||!BRIDGE_ORIGINS.includes(origin)||!bridgeId(id)||[...q.keys()].length!==3)return null
  return {mode,origin,id}
 }
 export function acceptDraft(config,event,opener){
@@ -33,6 +33,7 @@ export function acceptBridgeMessage(config,event,opener){
   if(data.ok&&typeof data.sessionId==='string'&&bridgeId(data.sessionId)&&Number.isInteger(data.count)&&data.count>=1&&data.count<=6)return {type:'ack',ok:true,sessionId:data.sessionId,count:data.count}
   if(!data.ok)return {type:'ack',ok:false}
  }
+ if(config.mode==='pair'&&data.type==='nexus:device:ack:v1'&&typeof data.ok==='boolean')return {type:'device-ack',ok:data.ok}
  if(config.mode==='save'){const draft=acceptDraft(config,event,opener);if(draft)return {type:'draft',draft}}
  return null
 }
