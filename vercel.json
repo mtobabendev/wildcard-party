@@ -45,5 +45,35 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/.well-known/oauth-protected-resource/api/pennycore-auth-demo",
+      "destination": "/api/pennycore-auth-demo?action=resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/api/pennycore-auth-demo",
+      "destination": "/api/pennycore-auth-demo?action=metadata"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/.well-known/oauth-authorization-server",
+      "destination": "/api/pennycore-auth-demo?action=metadata"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/authorize",
+      "destination": "/api/pennycore-auth-demo?action=authorize"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/token",
+      "destination": "/api/pennycore-auth-demo?action=token"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/revoke",
+      "destination": "/api/pennycore-auth-demo?action=revoke"
+    },
+    {
+      "source": "/api/pennycore-auth-demo/disconnect",
+      "destination": "/api/pennycore-auth-demo?action=disconnect"
+    }
   ]
 }

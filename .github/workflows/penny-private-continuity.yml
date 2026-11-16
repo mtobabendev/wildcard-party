@@ -4,6 +4,10 @@ on:
     paths:
       - 'api/nexus-memory.js'
       - 'api/pennycore-mcp-demo-v1.js'
+      - 'api/pennycore-auth-demo.js'
+      - 'lib/pennycore-oauth-demo*.js'
+      - 'db/pennycore-oauth-demo/**'
+      - 'test/pennycore-oauth-demo.test.js'
       - 'lib/pennycore-mcp-demo.js'
       - 'test/pennycore-mcp-demo.test.js'
       - 'lib/nexus-memory-*.js'
@@ -36,4 +40,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test test/penny-core-state.test.js test/penny-core-handler.test.js test/penny-owner.test.js test/penny-core-owner-chat.test.js test/nexus-memory.test.js test/pennycore-mcp-demo.test.js
+      - run: node --test test/penny-core-state.test.js test/penny-core-handler.test.js test/penny-owner.test.js test/penny-core-owner-chat.test.js test/nexus-memory.test.js test/pennycore-mcp-demo.test.js test/pennycore-oauth-demo.test.js
