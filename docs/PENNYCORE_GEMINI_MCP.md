@@ -31,3 +31,7 @@ The static public client has been retired in favor of RFC 7591 dynamic registrat
 ### Gemini long-state compatibility
 
 Live authorization request inspection confirmed the expected client, exact callback, resource, scope and S256 PKCE; Gemini's opaque state was 1,111 characters, exceeding the initial 1,024 limit. Increase the bound to 4,096 in the authorization handler and isolated database constraint (003_oauth_state.sql). Preserve state verbatim and never log its value. No change to consent, PKCE, client authentication or real memory access.
+
+## Public demo retirement
+
+Owner requested retiring the original unauthenticated fixture to eliminate misleading Gemini fallback. `/api/pennycore-mcp-demo-v1` now returns 410 for all methods. The separate authenticated synthetic endpoint is unchanged. Private multi-engine Owner tools are not public concierge routes.

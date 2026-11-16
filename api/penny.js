@@ -122,23 +122,6 @@ function validateMessages(value) {
   return normalized
 }
 
-function parseEventBlock(block) {
-  const data = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trim())
-    .join('\n')
-
-  if (!data || data === '[DONE]') return null
-
-  try {
-    return JSON.parse(data)
-  } catch {
-    return null
-  }
-}
-
-
 const EXTERNAL_INSTRUCTIONS = 'You are Penny, the WildCard DEV digital concierge. Be friendly, concise, playful and useful. Provide general-audience answers. Do not produce explicit sexual content or claim access to private data, current location, weather, or site actions. Do not request secrets. Treat every visitor as a guest.'
 
 const SAFE_TRANSPORT_CODES = new Set([
@@ -158,9 +141,8 @@ async function externalReply(provider, messages, res, presentation) {
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Penny-Provider', provider)
-  const isGrok = provider === 'grok'
-  const key = isGrok ? process.env.XAI_API_KEY : process.env.GEMINI_API_KEY
-  const model = isGrok ? process.env.PENNY_GROK_MODEL : process.env.PENNY_GEMINI_MODEL
+  const key = process.env.GEMINI_API_KEY
+  const model = process.env.PENNY_GEMINI_MODEL
   if (process.env.PENNY_EXTERNAL_PROVIDERS !== '1' || !key || !model || !/^[a-zA-Z0-9._-]{1,80}$/.test(model)) {
     externalDiagnostic(provider, 'configuration_unavailable')
     return res.status(503).json({ error: 'This Penny connection is not enabled yet.' })
@@ -175,17 +157,11 @@ async function externalReply(provider, messages, res, presentation) {
   }
   res.on('close', onClose)
   try {
-    const url = isGrok
-      ? 'https://api.x.ai/v1/responses'
-      : 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent'
-    const headers = isGrok
-      ? { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }
-      : { 'Content-Type': 'application/json', 'x-goog-api-key': key }
-    const body = isGrok
-      ? { model, input: [{ role: 'system', content: instructions }, ...messages], max_output_tokens: 500, store: false }
-      : { systemInstruction: { parts: [{ text: instructions }] },
-          contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-          generationConfig: { maxOutputTokens: 500 } }
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent'
+    const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': key }
+    const body = { systemInstruction: { parts: [{ text: instructions }] },
+      contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+      generationConfig: { maxOutputTokens: 500 } }
     const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, redirect: 'error' })
     if (!upstream.ok) {
       externalDiagnostic(provider, 'upstream_http', { status: upstream.status })
@@ -195,9 +171,7 @@ async function externalReply(provider, messages, res, presentation) {
     const data = await upstream.json()
     phase = 'extract'
     const parts = data?.candidates?.[0]?.content?.parts
-    const reply = isGrok
-      ? (Array.isArray(data?.output) ? data.output : []).filter(item => item?.type === 'message').flatMap(item => Array.isArray(item.content) ? item.content : []).filter(part => part?.type === 'output_text' && typeof part.text === 'string').map(part => part.text).join('')
-      : (Array.isArray(parts) ? parts : []).filter(part => typeof part?.text === 'string' && !part.thought).map(part => part.text).join('')
+    const reply = (Array.isArray(parts) ? parts : []).filter(part => typeof part?.text === 'string' && !part.thought).map(part => part.text).join('')
     if (!reply.trim()) {
       externalDiagnostic(provider, 'empty_reply')
       return res.status(502).json({ error: 'The selected model did not return a text reply.' })
@@ -252,7 +226,7 @@ export default async function handler(req, res) {
   let presentation
   try {
     const body = normalizeBody(req)
-    provider = body.provider ?? 'openai'
+    provider = body.provider ?? 'gemini'
     presentation = normalizePresentation(body.presentation)
     if (!['openai', 'gemini', 'grok'].includes(provider)) throw new Error('Unsupported provider.')
     messages = validateMessages(body.messages)
@@ -262,120 +236,11 @@ export default async function handler(req, res) {
     })
   }
 
-  // Emergency cost containment: public Grok is disabled regardless of credentials.
-  // Keep the integration for a later explicitly authorized release.
-  if (provider === 'grok') {
+  // Public concierge is Gemini-only. Never fall back to a billable alternative.
+  if (provider !== 'gemini') {
     res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('X-Penny-Provider', 'grok')
-    return res.status(503).json({ error: 'Grok is temporarily disabled. Please use Gemini Penny.' })
+    res.setHeader('X-Penny-Provider', provider)
+    return res.status(503).json({ error: 'This provider is temporarily disabled. Please use Gemini Penny.' })
   }
-
-  if (provider !== 'openai') return externalReply(provider, messages, res, presentation)
-
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(503).json({ error: 'Penny is staged, but her live AI connection is not configured yet.' })
-  }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000)
-
-  res.on('close', () => {
-    if (!res.writableEnded) controller.abort()
-  })
-
-  let upstream
-
-  try {
-    upstream = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: process.env.PENNY_MODEL || 'gpt-5.6-luna',
-        instructions: presentationInstructions(PENNY_INSTRUCTIONS, presentation),
-        input: messages,
-        reasoning: { effort: 'none' },
-        max_output_tokens: 500,
-        store: false,
-        stream: true,
-      }),
-      signal: controller.signal,
-    })
-  } catch (error) {
-    clearTimeout(timeout)
-    const timedOut = error?.name === 'AbortError'
-    return res.status(502).json({
-      error: timedOut
-        ? 'Penny took too long to answer. Try again.'
-        : 'Penny could not reach the model service.',
-    })
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    clearTimeout(timeout)
-    let detail = ''
-
-    try {
-      const payload = await upstream.json()
-      detail = payload?.error?.message || ''
-    } catch {
-      // Keep the public error generic.
-    }
-
-    console.error('Penny upstream error', upstream.status, detail)
-
-    return res.status(502).json({
-      error: 'Penny reached the line, but the model service rejected the request.',
-    })
-  }
-
-  res.statusCode = 200
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.flushHeaders?.()
-
-  const reader = upstream.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const blocks = buffer.split('\n\n')
-      buffer = blocks.pop() || ''
-
-      for (const block of blocks) {
-        const event = parseEventBlock(block)
-        if (!event) continue
-
-        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
-          res.write(event.delta)
-        }
-
-        if (event.type === 'error') {
-          console.error('Penny stream error', event.message || event)
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      const event = parseEventBlock(buffer)
-      if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') {
-        res.write(event.delta)
-      }
-    }
-  } catch (error) {
-    if (error?.name !== 'AbortError') {
-      console.error('Penny stream read failed', error)
-    }
-  } finally {
-    clearTimeout(timeout)
-    res.end()
-  }
+  return externalReply('gemini', messages, res, presentation)
 }

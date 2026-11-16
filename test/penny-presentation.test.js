@@ -29,8 +29,8 @@ test('external provider transport and response diagnostics are bounded and fail 
   async function request(stub, provider = 'gemini') {
     globalThis.fetch = async (url, options) => { requests.push({ url, options }); return stub() }
     const res = new Reply()
-    await handler({ method: 'POST', headers: { host: 'party.example', 'x-forwarded-for': 'test-' + (++ip) }, body: { provider, presentation: 'standard', messages: [{ role: 'user', content: message }] } }, res)
-    assert.equal(res.headers['x-penny-provider'], provider)
+    await handler({ method: 'POST', headers: { host: 'party.example', 'x-forwarded-for': 'test-' + (++ip) }, body: { ...(provider === null ? {} : { provider }), presentation: 'standard', messages: [{ role: 'user', content: message }] } }, res)
+    assert.equal(res.headers['x-penny-provider'], provider ?? 'gemini')
     return res
   }
   function latest(category) { assert.equal(logs.at(-1)?.[1]?.category, category) }
@@ -73,7 +73,15 @@ test('external provider transport and response diagnostics are bounded and fail 
       assert.match(res.payload.error, /temporarily disabled/)
       assert.equal(requests.length, before)
     })
-    assert.equal(requests.length, 10)
+    await t.test('omitted provider defaults to Gemini and explicit OpenAI is blocked', async () => {
+      const before = requests.length
+      const okDefault = await request(() => ok({ candidates: [{ content: { parts: [{ text: 'Gemini default' }] } }] }), null)
+      assert.equal(okDefault.statusCode, 200); assert.equal(okDefault.payload, 'Gemini default')
+      const denied = await request(() => { throw new Error('No upstream call allowed') }, 'openai')
+      assert.equal(denied.statusCode, 503)
+      assert.equal(requests.length, before + 1)
+    })
+    assert.equal(requests.length, 11)
     assert.ok(requests.every(entry => entry.url.includes('generativelanguage.googleapis.com')))
     assert.ok(!JSON.stringify(logs).includes(secret))
     assert.ok(!JSON.stringify(logs).includes(message))

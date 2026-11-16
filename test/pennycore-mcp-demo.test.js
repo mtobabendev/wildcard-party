@@ -45,3 +45,8 @@ test('transport rejects unexpected origins, methods, input and oversized request
  assert.equal(request('ping',{}, {body:[{jsonrpc:'2.0',method:'ping',id:1}]}).body.error.code,-32600)
  assert.equal(request('ping').headers['Cache-Control'],'no-store')
 })
+
+import retiredDemo from '../api/pennycore-mcp-demo-v1.js'
+test('retired public demo never exposes a tool or redirects',()=>{
+ for(const method of ['GET','POST']){const headers={},res={setHeader(k,v){headers[k]=v},status(code){this.code=code;return this},json(body){this.body=body;return this}};retiredDemo({method,body:{jsonrpc:'2.0',method:'tools/call',id:1}},res);assert.equal(res.code,410);assert.equal(headers['Cache-Control'],'no-store');assert.equal(headers.Location,undefined);assert.equal(res.body.result,undefined)}
+})

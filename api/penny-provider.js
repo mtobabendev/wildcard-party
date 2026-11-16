@@ -8,6 +8,6 @@ export default async function providerHandler(req, res) {
   }
   let body
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body } catch { return res.status(400).json({ error: 'Invalid request.' }) }
-  if (!['grok', 'gemini'].includes(body?.provider)) return res.status(400).json({ error: 'Explicit provider required.' })
+  if (body?.provider !== 'gemini') return res.status(400).json({ error: 'Gemini provider required.' })
   return handler(req, res)
 }
