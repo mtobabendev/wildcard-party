@@ -91,3 +91,15 @@ test('private in-session search, relevance, pagination merge and exact reviewed 
  assert.throws(()=>handoff(Array(MAX_SELECTED+1).fill(a)))
  assert.throws(()=>handoff(Array(6).fill({...a,state:'s'.repeat(2000),context:'c'.repeat(4000),memory:'m'.repeat(4000),nextStep:'n'.repeat(2000)})))
 })
+
+import {bridgeConfig,acceptDraft,restoreRecord} from '../src/nexus/bridge.js'
+test('continuity popup only accepts exact local origin, opener, transaction and validated draft',()=>{
+ const id='11111111-1111-4111-8111-111111111111',origin='http://127.0.0.1:5173',opener={};const cfg=bridgeConfig('?bridge=save&local='+encodeURIComponent(origin)+'&id='+id)
+ const packet={title:'Fictional',state:'Synthetic only',context:'',memory:'',nextStep:''},data={type:'nexus:continuity:draft:v1',id,source:'ollama',packet}
+ assert.deepEqual(acceptDraft(cfg,{source:opener,origin,data},opener),{source:'ollama',...packet})
+ for(const e of [{source:{},origin,data},{source:opener,origin:'https://evil.example',data},{source:opener,origin,data:{...data,id:'wrong'}}])assert.equal(acceptDraft(cfg,e,opener),null)
+ assert.equal(bridgeConfig('?bridge=save&local=https://evil.example&id='+id),null)
+ assert.equal(bridgeConfig('?bridge=save&local='+encodeURIComponent(origin)+'&id='+id+'&id='+id),null)
+ assert.throws(()=>restoreRecord({...packet,id:'1',source:'ollama',sources:['gemini'],createdAt:'2026-11-16'}))
+ assert.equal(restoreRecord({...packet,id:'1',source:'ollama',sources:['ollama'],createdAt:'2026-11-16'}).title,'Fictional')
+})
