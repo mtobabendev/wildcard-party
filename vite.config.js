@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   plugins: [react()],
-  build: { rollupOptions: { input: {
+  build: { assetsDir: 'build-assets', rollupOptions: { input: {
     party: fileURLToPath(new URL('./index.html', import.meta.url)),
     nexus: fileURLToPath(new URL('./nexus.html', import.meta.url)),
   } } },
