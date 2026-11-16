@@ -1,21 +1,40 @@
-.penny-thought { min-width: 0; position: relative; margin: .55rem 0; color: #f7edff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-.penny-thought__bubble { position: relative; display: grid; gap: .22rem; width: 100%; min-height: 44px; text-align: left; padding: .55rem .7rem; border: 1px solid #ab75ce; border-radius: 1rem; background: #22142f; color: #f7edff; box-shadow: 0 0 14px #b75cff26; cursor: pointer; font: inherit; }
-.penny-thought__bubble::before, .penny-thought__bubble::after { content: ''; position: absolute; background: #22142f; border: 1px solid #ab75ce; border-radius: 50%; pointer-events: none; }
-.penny-thought__bubble::before { width: 9px; height: 9px; left: -7px; top: 18px; }
-.penny-thought__bubble::after { width: 4px; height: 4px; left: -13px; top: 26px; }
+/* Translucent thought glass. Text and controls remain fully opaque. */
+.penny-thought { --thought-surface: rgba(34, 20, 47, .80); --thought-tail-x: 50%; min-width: 0; position: relative; margin: .55rem 0; color: #f7edff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.penny-thought__bubble { position: relative; display: grid; gap: .22rem; width: 100%; min-height: 44px; text-align: left; padding: .55rem .7rem; border: 1px solid #ab75ce; border-radius: 1rem; background: var(--thought-surface); color: #f7edff; box-shadow: 0 0 14px #b75cff26; cursor: pointer; font: inherit; }
+.penny-thought__bubble::before, .penny-thought__bubble::after { content: ''; position: absolute; box-sizing: border-box; background: var(--thought-surface); border: 1px solid; border-color: inherit; border-radius: 50%; pointer-events: none; left: var(--thought-tail-x); transform: translateX(-50%); }
+.penny-thought__bubble::before { width: 10px; height: 10px; bottom: -10px; }
+.penny-thought__bubble::after { width: 5px; height: 5px; bottom: -17px; }
 .penny-thought__greeting { color: #ffb5e8; font-size: .76rem; font-weight: 800; }
 .penny-thought__quip { font-size: .72rem; line-height: 1.3; overflow-wrap: anywhere; }
 .penny-thought__hint { font-size: .62rem; color: #d0b9ea; text-decoration: underline; }
 .penny-thought__bubble:focus-visible, .penny-thought__dialog button:focus-visible, .penny-thought__dialog a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-.penny-thought__bubble::before { left: 14px; top: auto; bottom: -9px; }
-.penny-thought__bubble::after { left: 5px; top: auto; bottom: -16px; }
-.penny-video-static > .penny-thought--main { width: min(88%, 15rem); margin: 0 0 1.15rem auto; }
-.penny-fans__profile > .penny-thought--after-hours { position: absolute; z-index: 4; top: -8.4rem; left: calc(clamp(1rem, 4vw, 2rem) + var(--pf-avatar-size) * .58); width: min(15rem, calc(100% - clamp(1rem, 4vw, 2rem) - var(--pf-avatar-size) * .58 - 1rem)); margin: 0; }
+@media (prefers-contrast: more) { .penny-thought { --thought-surface: #22142f; } }
+
+/* Home: centered above the video portrait. */
+.penny-video-static > .penny-thought--main { width: min(88%, 15rem); margin: 0 auto 1.15rem; }
+
+/* After Hours: share the portrait's left edge and live size, including expanded mode.
+   Bottom anchoring keeps longer reflections above the portrait. */
+.penny-fans__profile > .penny-thought--after-hours {
+  --thought-tail-x: clamp(1rem, calc(var(--pf-avatar-size) * .5), calc(100% - 1rem));
+  position: absolute; z-index: 4; top: auto; bottom: calc(100% + 4.7rem);
+  left: clamp(1rem, 4vw, 2rem);
+  width: min(15rem, calc(100% - 2 * clamp(1rem, 4vw, 2rem))); margin: 0;
+}
+@media (max-width: 850px) {
+  .penny-fans__profile > .penny-thought--after-hours { width: min(14rem, calc(100% - 2 * clamp(1rem, 4vw, 2rem))); }
+}
+
+/* Party: the portrait is to the left, not beneath the center of the bubble. */
 .profile-card > .penny-thought--party { position: absolute; top: 7px; left: 88px; right: 12px; margin: 0; z-index: 2; }
+.penny-thought--party .penny-thought__bubble::before { left: -8px; top: clamp(10px, 65px, calc(100% - 18px)); bottom: auto; transform: none; }
+.penny-thought--party .penny-thought__bubble::after { left: -17px; top: clamp(19px, 74px, calc(100% - 9px)); bottom: auto; transform: none; }
 @media (max-width: 850px) {
   .profile-card > .penny-thought--party { position: relative; top: auto; left: auto; right: auto; grid-column: 2; grid-row: 1; margin: 0 0 1rem; }
   .profile-card:has(> .penny-thought--party) > .profile-avatar-shell { grid-column: 1; grid-row: 2; }
   .profile-card:has(> .penny-thought--party) > .profile-copy { grid-column: 2; grid-row: 2; }
+  .penny-thought--party .penny-thought__bubble::before { left: -4px; top: auto; bottom: -9px; }
+  .penny-thought--party .penny-thought__bubble::after { left: -15px; top: auto; bottom: -16px; }
 }
 .penny-fans__online { display: inline-flex; align-items: center; gap: .35rem; white-space: nowrap; }
 .penny-fans__online-dot { display: inline-block; width: .55rem; height: .55rem; flex: 0 0 .55rem; border-radius: 50%; background: #ff57bb; box-shadow: 0 0 8px #ff57bb; animation: penny-online-pulse 2s ease-in-out infinite; }
