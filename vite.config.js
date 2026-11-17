@@ -7,5 +7,6 @@ export default defineConfig({
   build: { assetsDir: 'build-assets', rollupOptions: { input: {
     party: fileURLToPath(new URL('./index.html', import.meta.url)),
     nexus: fileURLToPath(new URL('./nexus.html', import.meta.url)),
+    messengerEmbed: fileURLToPath(new URL('./messenger-embed.html', import.meta.url)),
   } } },
 })

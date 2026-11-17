@@ -964,3 +964,12 @@ body::before {
     padding: 8px 10px 0;
   }
 }
+
+/* Consistent Messenger unread signal for Party's existing native COMMS tab. */
+.main-nav button.comms-nav-unread, .main-nav button.comms-nav-unread span { color: #baff00; }
+.comms-nav-unread .comms-nav-badge { border-color: #baff00; background: #baff00; color: #152000; box-shadow: 0 0 16px #baff0070; animation: comms-unread-pulse 2.4s ease-in-out infinite; }
+@keyframes comms-unread-pulse { 50% { box-shadow: 0 0 24px 3px #baff0090; } }
+.comms-notice { position: fixed; z-index: 100; top: 80px; right: 12px; width: min(320px, calc(100vw - 24px)); padding: 14px; border: 1px solid #baff00; border-radius: 12px; background: #21132f; color: #f9effc; box-shadow: 0 8px 24px #0008; }
+.comms-notice p { margin: 0 0 10px; }
+.comms-notice button { min-height: 44px; margin-right: 6px; padding: 6px 10px; border: 1px solid #87668f; border-radius: 8px; background: #251733; color: inherit; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .comms-nav-unread .comms-nav-badge { animation: none; } }

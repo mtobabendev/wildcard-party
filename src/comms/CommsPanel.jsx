@@ -147,6 +147,7 @@ export default function CommsPanel({
   accountLoading = false,
   onRequireSignIn,
   onUnreadCountChange,
+  allowCalls = true,
 }) {
   const [conversations, setConversations] = useState([])
   const [selectedConversation, setSelectedConversation] = useState(null)
@@ -998,10 +999,9 @@ export default function CommsPanel({
                 </div>
               </header>
 
-              <TwilioCall
-                account={account}
-                conversation={selectedConversation}
-              />
+              {allowCalls && (
+                <TwilioCall account={account} conversation={selectedConversation} />
+              )}
 
               <div className="comms-history-tools">
                 {hasOlder ? (

@@ -10,7 +10,7 @@ async function request(path, options = {}) {
   return payload
 }
 
-export default function Messenger() {
+export default function Messenger({ embedded = false, onStatus } = {}) {
   const [account, setAccount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -26,7 +26,7 @@ export default function Messenger() {
     document.title = 'WildCard Messenger'
     const controller = new AbortController()
     request('/api/auth/me', { signal: controller.signal })
-      .then(payload => { if (!controller.signal.aborted) setAccount(payload.account || null) })
+      .then(payload => { if (!controller.signal.aborted) { setAccount(payload.account || null); if (!payload.account) onStatus?.(0, false) } })
       .catch(err => { if (!controller.signal.aborted) setError(err.message) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => { controller.abort(); document.title = previousTitle }
@@ -45,6 +45,7 @@ export default function Messenger() {
       })
       if (!payload.account?.id) throw new Error('Account was not returned.')
       setAccount(payload.account)
+      onStatus?.(0, true)
       setPassword('')
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
@@ -58,6 +59,7 @@ export default function Messenger() {
       await request('/api/auth/logout', { method: 'POST' })
       setAccount(null)
       setUnread(0)
+      onStatus?.(0, false)
       setView('comms')
       setPassword('')
     } catch (err) { setError(err.message) }
@@ -65,16 +67,16 @@ export default function Messenger() {
   }
 
   return (
-    <main className="messenger-app">
+    <main className={embedded ? "messenger-app messenger-app--embedded" : "messenger-app"}>
       <header className="messenger-bar">
         <div><span className="messenger-brand">♠ WILDCARD MESSENGER</span>
           <small>PRIVATE COMMS{account && unread > 0 ? ' · ' + unread + ' unread' : ''}</small></div>
         <nav aria-label="Messenger navigation">
-          <a href="/">Party</a>
-          <a href="https://www.wildcarddev.com/">WildCard DEV</a>
+          {!embedded && <a href="/">Party</a>}
+          {!embedded && <a href="https://www.wildcarddev.com/">WildCard DEV</a>}
           {account && <>
             <button type="button" aria-pressed={view === 'comms'} onClick={() => setView('comms')}>Messages</button>
-            <button type="button" aria-pressed={view === 'penny'} onClick={() => setView('penny')}>Penny Core</button>
+            {!embedded && <button type="button" aria-pressed={view === 'penny'} onClick={() => setView('penny')}>Penny Core</button>}
             <button type="button" disabled={busy} onClick={signOut}>Sign out</button>
           </>}
         </nav>
@@ -87,14 +89,14 @@ export default function Messenger() {
           <label>Handle<input required autoComplete="username" value={handle} onChange={e => setHandle(e.target.value)} /></label>
           <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
           <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-          <a href="/">Create an account in WildCard Party</a>
+          <a href="https://party.wildcarddev.com/" target={embedded ? "_blank" : undefined} rel="noopener noreferrer">Create an account in WildCard Party</a>
         </form>
       ) : view === 'penny' ? (
         <PennyCore key={account.id} />
       ) : (
         <CommsPanel key={account.id} account={account} accountLoading={false}
-          onRequireSignIn={() => { setAccount(null); setUnread(0) }}
-          onUnreadCountChange={setUnread} />
+          onRequireSignIn={() => { setAccount(null); setUnread(0); onStatus?.(0, false) }}
+          allowCalls={!embedded} onUnreadCountChange={count => { setUnread(count); onStatus?.(count, true) }} />
       )}
     </main>
   )

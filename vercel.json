@@ -13,10 +13,36 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
-        },
+        }
+      ]
+    },
+    {
+      "source": "/((?!messenger-embed[.]html$).*)",
+      "headers": [
         {
           "key": "X-Frame-Options",
           "value": "DENY"
+        }
+      ]
+    },
+    {
+      "source": "/messenger-embed.html",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors https://wildcarddev.com https://www.wildcarddev.com https://party.wildcarddev.com https://labs.wildcarddev.com https://pennysoffice.wildcarddev.com https://pennytv.wildcarddev.com"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "private, no-store"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
     },

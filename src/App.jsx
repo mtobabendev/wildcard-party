@@ -261,6 +261,8 @@ function App() {
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountError, setAccountError] = useState('')
   const [commsUnreadCount, setCommsUnreadCount] = useState(0)
+  const [commsToast, setCommsToast] = useState(false)
+  const lastUnreadRef = useRef({ accountId: null, count: 0 })
   const [accountForm, setAccountForm] = useState({
     displayName: '',
     handle: '',
@@ -288,6 +290,17 @@ function App() {
       loadPersistentPosts(ownerTokenRef.current),
     ])
   }, [])
+
+  useEffect(() => {
+    const previous = lastUnreadRef.current
+    const accountId = account?.id || null
+    if (!accountId || previous.accountId !== accountId || commsUnreadCount === 0 || activeNav === 'comms') {
+      setCommsToast(false)
+    } else if (commsUnreadCount > previous.count && !document.hidden) {
+      setCommsToast(true)
+    }
+    lastUnreadRef.current = { accountId, count: accountId ? commsUnreadCount : 0 }
+  }, [account?.id, commsUnreadCount, activeNav])
 
   useEffect(() => {
     if (!account?.id) {
@@ -989,7 +1002,7 @@ function App() {
             return (
               <button
                 key={item.id}
-                className={activeNav === item.id ? 'active' : ''}
+                className={(activeNav === item.id ? 'active ' : '') + (showUnread ? 'comms-nav-unread' : '')}
                 onClick={() => changeSection(item.id)}
                 type="button"
                 aria-label={showUnread
@@ -1026,6 +1039,13 @@ function App() {
         </div>
       </header>
 
+      {commsToast && account?.id && commsUnreadCount > 0 && activeNav !== 'comms' && (
+        <aside className="comms-notice" aria-label="Unread messages">
+          <p role="status">You have {commsUnreadCount} unread message{commsUnreadCount === 1 ? '' : 's'}.</p>
+          <button type="button" onClick={() => { setCommsToast(false); changeSection('comms') }}>Open messages</button>
+          <button type="button" onClick={() => setCommsToast(false)}>Dismiss</button>
+        </aside>
+      )}
       <main id="top" className="page-shell">
         <section className="takeover-banner" aria-label="Penny takeover banner">
           <div className="banner-grid" aria-hidden="true" />
