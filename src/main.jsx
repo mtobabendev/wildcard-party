@@ -4,7 +4,10 @@ import App from './App.jsx'
 import './styles.css'
 
 const Messenger = lazy(() => import('./comms/Messenger.jsx'))
-const isMessenger = new URLSearchParams(window.location.search).get('app') === 'messenger'
+const OwnerAccess = lazy(() => import('./afterhours/OwnerAccess.jsx'))
+const app = new URLSearchParams(window.location.search).get('app')
+const isMessenger = app === 'messenger'
+const isAccessAdmin = app === 'afterhours-admin'
 
 // The existing public Party dock stays intact; Messenger gets the shared concierge.
 if (isMessenger) {
@@ -19,6 +22,10 @@ createRoot(document.getElementById('root')).render(
     {isMessenger ? (
       <Suspense fallback={<main className="page-shell">Opening WildCard Messenger…</main>}>
         <Messenger />
+      </Suspense>
+    ) : isAccessAdmin ? (
+      <Suspense fallback={<main className="page-shell">Opening Owner Gate…</main>}>
+        <OwnerAccess />
       </Suspense>
     ) : <App />}
   </StrictMode>,

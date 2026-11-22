@@ -8,5 +8,7 @@ export default defineConfig({
     party: fileURLToPath(new URL('./index.html', import.meta.url)),
     nexus: fileURLToPath(new URL('./nexus.html', import.meta.url)),
     messengerEmbed: fileURLToPath(new URL('./messenger-embed.html', import.meta.url)),
+    afterHoursBridge: fileURLToPath(new URL('./afterhours-bridge.html', import.meta.url)),
+    afterHoursMembers: fileURLToPath(new URL('./afterhours-members.html', import.meta.url)),
   } } },
 })

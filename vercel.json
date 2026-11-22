@@ -17,7 +17,7 @@
       ]
     },
     {
-      "source": "/((?!messenger-embed[.]html$).*)",
+      "source": "/((?!(?:messenger-embed|afterhours-bridge|afterhours-members)[.]html$).*)",
       "headers": [
         {
           "key": "X-Frame-Options",
@@ -31,6 +31,31 @@
         {
           "key": "Content-Security-Policy",
           "value": "frame-ancestors https://wildcarddev.com https://www.wildcarddev.com https://party.wildcarddev.com https://labs.wildcarddev.com https://pennysoffice.wildcarddev.com https://pennytv.wildcarddev.com"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "private, no-store"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/afterhours-bridge.html",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors https://wildcarddev.com https://www.wildcarddev.com; base-uri 'none'; form-action 'none'"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
         },
         {
           "key": "Cache-Control",
@@ -77,6 +102,31 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/afterhours-members.html",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https:; connect-src 'self'; frame-ancestors https://wildcarddev.com https://www.wildcarddev.com; base-uri 'none'; form-action 'self'"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "private, no-store"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
     }

@@ -51,6 +51,7 @@ export default function PennyOwner() {
   return <section aria-label="Owner project memory">
     <h2>♠ OWNER GATE</h2>
     <p>Read-only WildCard DEV project memory. Separate from your personal notes and conversation.</p>
+    <p><a href="/?app=afterhours-admin">Manage Penny, Kandy and Ashley access</a></p>
     {!access.ready ? <p>Project memory is not enabled in this environment.</p> : <>
       <button type="button" disabled={busy} onClick={() => setLoad(value => value + 1)}>
         {busy ? 'Loading project memory…' : 'Load project memory'}
