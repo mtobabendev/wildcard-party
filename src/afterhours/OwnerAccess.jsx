@@ -27,7 +27,7 @@ async function request(method, body, query = '') {
 export default function OwnerAccess() {
   const [members, setMembers] = useState([])
   const [search, setSearch] = useState('')
-  const [form, setForm] = useState({ handle: '', displayName: '', password: '' })
+  const [form, setForm] = useState({ handle: '', displayName: '', password: '', email: '' })
   const [reset, setReset] = useState({ id: '', password: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -77,12 +77,13 @@ export default function OwnerAccess() {
         <form onSubmit={async event => {
           event.preventDefault()
           if (await perform({ action: 'create', ...form }, 'Member created. Access remains locked until you grant it.')) {
-            setForm({ handle: '', displayName: '', password: '' })
+            setForm({ handle: '', displayName: '', password: '', email: '' })
           }
         }} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <input style={styles.input} aria-label="Username" placeholder="username" required value={form.handle} onChange={e => setForm({ ...form, handle: e.target.value })} />
           <input style={styles.input} aria-label="Display name" placeholder="Display name" required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} />
           <input style={styles.input} aria-label="Temporary password" type="password" autoComplete="new-password" minLength={10} placeholder="Temporary password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+          <input style={styles.input} aria-label="Email address (optional)" type="email" autoComplete="email" maxLength={254} placeholder="Email (optional)" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
           <button style={styles.button} disabled={busy}>Create member</button>
         </form>
       </section>
@@ -96,6 +97,7 @@ export default function OwnerAccess() {
         <p>Showing up to 60 matching accounts. Each switch is independent.</p>
         {members.map(member => <article key={member.id} style={{ padding: '12px 0', borderTop: '1px solid #5b3e61' }}>
           <strong>@{member.handle}</strong> <span>({member.displayName})</span>
+          {member.email && <p style={{ margin: '3px 0', color: '#dfc5db', fontSize: 13 }}>Email (unverified): {member.email}</p>}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
             {AREAS.map(area => {
               const allowed = member.areas.includes(area)

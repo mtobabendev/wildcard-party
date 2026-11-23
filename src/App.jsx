@@ -267,6 +267,7 @@ function App() {
     displayName: '',
     handle: '',
     password: '',
+    email: '',
     bio: '',
   })
   const [pennyOpen, setPennyOpen] = useState(false)
@@ -564,6 +565,7 @@ function App() {
               displayName: accountForm.displayName,
               handle: accountForm.handle,
               password: accountForm.password,
+              email: accountForm.email.trim(),
               ownerToken: ownerTokenRef.current,
             }
           : {
@@ -586,6 +588,7 @@ function App() {
         displayName: nextAccount.displayName || '',
         handle: nextAccount.handle || '',
         password: '',
+        email: '',
         bio: nextAccount.bio || '',
       })
 
@@ -616,7 +619,7 @@ function App() {
       await socialJson(response)
       setAccount(null)
       setAccountMode('login')
-      setAccountForm({ displayName: '', handle: '', password: '', bio: '' })
+      setAccountForm({ displayName: '', handle: '', password: '', email: '', bio: '' })
       setNotice('Signed out. This browser still retains its local Stage 3A ownership token.')
       await loadPersistentPosts(ownerTokenRef.current)
     } catch (error) {
@@ -1419,6 +1422,22 @@ function App() {
                 />
               </div>
             </label>
+
+            {accountMode === 'register' && (
+              <label>
+                <span>EMAIL ADDRESS (OPTIONAL)</span>
+                <input
+                  type="email"
+                  value={accountForm.email}
+                  onChange={(event) => updateAccountField('email', event.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                  maxLength={254}
+                  placeholder="you@example.com"
+                />
+                <small>Private and optional. Not used for sign-in or automatic emails.</small>
+              </label>
+            )}
 
             {accountMode !== 'profile' && (
               <label>

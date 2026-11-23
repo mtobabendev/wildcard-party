@@ -4,6 +4,7 @@ import {
   databaseNotConfigured,
   normalizeDisplayName,
   normalizeHandle,
+  normalizeOptionalEmail,
   registerAccount,
   sameOrigin,
   validPassword,
@@ -58,6 +59,7 @@ export default async function handler(req, res) {
     const body = bodyOf(req)
     const handle = normalizeHandle(body.handle)
     const displayName = normalizeDisplayName(body.displayName)
+    const email = normalizeOptionalEmail(body.email)
     const password = body.password
 
     if (!handle) {
@@ -78,7 +80,11 @@ export default async function handler(req, res) {
       })
     }
 
-    const account = await registerAccount({ handle, displayName, password })
+    if (email === null) {
+      return res.status(400).json({ error: 'Enter a valid email address or leave it blank.' })
+    }
+
+    const account = await registerAccount({ handle, displayName, password, email })
     const claimed = await claimAnonymousContent(account, body.ownerToken || '')
     await createSession(res, account.id)
 
