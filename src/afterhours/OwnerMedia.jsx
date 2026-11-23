@@ -28,6 +28,41 @@ export default function OwnerMedia() {
   const [collection, setCollection] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [pairingToken, setPairingToken] = useState('')
+  const [pairingBusy, setPairingBusy] = useState(false)
+  const [pairingStatus, setPairingStatus] = useState('')
+
+  async function pairWorkstation() {
+    if (pairingBusy) return
+    setPairingBusy(true)
+    setPairingStatus('')
+    try {
+      const { pairing } = await api({ action: 'pair' })
+      if (!pairing?.token) throw new Error('Pairing token was not returned.')
+      setPairingToken(pairing.token)
+      setPairingStatus('Pairing key created for the existing private uploader. Copy once, then paste into the local pairing command.')
+    } catch (error) { setPairingStatus('Pairing failed: ' + error.message) }
+    finally { setPairingBusy(false) }
+  }
+
+  async function copyPairingToken() {
+    try {
+      if (!pairingToken) return
+      await navigator.clipboard.writeText(pairingToken)
+      setPairingStatus('Pairing key copied. Paste it into your laptop terminal, not into chat.')
+    } catch { setPairingStatus('Clipboard unavailable. Select and copy the key in the field.') }
+  }
+
+  async function revokePairings() {
+    if (pairingBusy || !window.confirm('Revoke all paired workstation upload keys? Existing browser sessions are unaffected.')) return
+    setPairingBusy(true)
+    try {
+      const result = await api({ action: 'revoke-pairings' })
+      setPairingToken('')
+      setPairingStatus((result.revoked || 0) + ' workstation upload key(s) revoked.')
+    } catch (error) { setPairingStatus('Revocation failed: ' + error.message) }
+    finally { setPairingBusy(false) }
+  }
 
   async function importExistingPennyMedia() {
     if (busy) return
@@ -86,6 +121,19 @@ export default function OwnerMedia() {
   return <section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
     <p>Upload private images and videos. Use the optional collection name to create a gallery or reel series automatically. Leave it blank for the existing Private Archive. Public /static/ copies remain public until removed.</p>
+    <div style={{ margin: '18px 0', padding: 16, border: '1px solid #9a6795', borderRadius: 12 }}>
+      <h3>Connect Penny's workstation — one time</h3>
+      <p>Authorize the existing Owner laptop to upload future approved photos and videos directly. No new database, manual browser upload, or production secrets copied to the laptop. Pairing expires after 90 days and only authorizes private-media uploads.</p>
+      <button type="button" disabled={pairingBusy} onClick={pairWorkstation}>Create workstation pairing key</button>{' '}
+      <button type="button" disabled={pairingBusy} onClick={revokePairings}>Revoke workstation keys</button>
+      {pairingToken && <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <input type="text" readOnly aria-label="Workstation pairing key" value={pairingToken} onFocus={event => event.target.select()}
+          spellCheck={false} autoComplete="off" style={{ flex: '1 1 290px', minWidth: 180 }} />
+        <button type="button" onClick={copyPairingToken}>Copy key</button>
+      </div>}
+      <p style={{ fontSize: 13 }}>Copy the key once, then ask Penny to pair the connected laptop from its clipboard. Manual fallback: run <code>scripts/afterhours-upload.ps1 -Pair</code> and paste at the hidden prompt. Do not send the key through chat. Later uploads run directly through the connected workstation.</p>
+      {pairingStatus && <p role="status">{pairingStatus}</p>}
+    </div>
     <form onSubmit={upload} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
       <label>Area{' '}
         <select aria-label="Private media area" value={area} onChange={e => setArea(e.target.value)}>
