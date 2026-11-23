@@ -572,12 +572,23 @@ function App() {
               ownerToken: ownerTokenRef.current,
             }
 
-      const response = await fetch(endpoint, {
-        method: accountMode === 'profile' ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const payload = await socialJson(response)
+      const submitRequest = async () => {
+        const response = await fetch(endpoint, {
+          method: accountMode === 'profile' ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        return socialJson(response)
+      }
+      const loadingLabel = accountMode === 'register'
+        ? 'Creating your WildCard DEV account…'
+        : accountMode === 'profile'
+          ? 'Saving your WildCard profile…'
+          : 'Signing in to WildCard DEV…'
+      const pending = submitRequest()
+      const payload = window.WildCardLoader?.track
+        ? await window.WildCardLoader.track(pending, { label: loadingLabel })
+        : await pending
       const nextAccount = payload.account
 
       setAccount(nextAccount)
