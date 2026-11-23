@@ -1,6 +1,6 @@
 import {
   currentAccount, databaseNotConfigured, normalizeDisplayName,
-  normalizeHandle, registerAccount, sameOrigin, validPassword,
+  normalizeHandle, normalizeOptionalEmail, registerAccount, sameOrigin, validPassword,
 } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
 import { changeAreaGrant, listMemberAccess, recordAccessAudit, validAccountId, validArea } from '../../lib/afterhours-access.js'
@@ -40,10 +40,14 @@ export default async function handler(req, res) {
     if (body.action === 'create') {
       const handle = normalizeHandle(body.handle)
       const displayName = normalizeDisplayName(body.displayName)
+      const email = normalizeOptionalEmail(body.email)
       if (!handle || !displayName || !validPassword(body.password)) {
         return res.status(400).json({ error: 'Valid handle, display name, and password (10–128 chars) required.' })
       }
-      const member = await registerAccount({ handle, displayName, password: body.password })
+      if (email === null) {
+        return res.status(400).json({ error: 'Enter a valid email address or leave it blank.' })
+      }
+      const member = await registerAccount({ handle, displayName, password: body.password, email })
       await recordAccessAudit({ actorId: operator.id, accountId: member.id, action: 'create-account' })
       return res.status(201).json({ member })
     }
