@@ -40,3 +40,15 @@ test('member gallery fetches through existing authorized APIs and hides all medi
   assert.match(owner, /name: createCollectionName\(file\.name, collection\)/)
   assert.match(owner, /action: 'finish', id: ticket\.id/)
 })
+
+test('compact embedded vault preserves Party-only authentication and exposes height only to trusted site origins', () => {
+  const view = readFileSync(new URL('../src/afterhours/MemberArea.jsx', import.meta.url), 'utf8')
+  const headers = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')
+  assert.match(view, /get\('embed'\) === '1'/)
+  assert.match(view, /vault vault--embedded/)
+  assert.match(view, /wildcard:afterhours:height:v1/)
+  assert.match(view, /https:\/\/www\.wildcarddev\.com/)
+  assert.match(view, /window\.parent\.postMessage\(message, origin\)/)
+  assert.match(view, /fetch\('\/api\/afterhours\/access\?area='/)
+  assert.match(headers, /frame-ancestors https:\/\/wildcarddev\.com https:\/\/www\.wildcarddev\.com/)
+})

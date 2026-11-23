@@ -16,6 +16,7 @@ function initialView() {
 
 export default function MemberArea() {
   const area = new URLSearchParams(window.location.search).get('area') || ''
+  const embedded = new URLSearchParams(window.location.search).get('embed') === '1'
   const [status, setStatus] = useState('checking')
   const [media, setMedia] = useState([])
   const [view, setView] = useState(initialView)
@@ -23,6 +24,7 @@ export default function MemberArea() {
   const [viewer, setViewer] = useState(null)
   const dialogRef = useRef(null)
   const touchRef = useRef(null)
+  const containerRef = useRef(null)
 
   useEffect(() => {
     if (!AREAS.includes(area)) { setStatus('invalid'); setMedia([]); return undefined }
@@ -63,6 +65,29 @@ export default function MemberArea() {
     if (!viewer && dialog.open) dialog.close()
   }, [viewer])
 
+  // The vault remains on Party's authenticated origin, even when displayed inside Penny's page.
+  // Only the frame height is shared with the known WildCard site origins; no account or media data.
+  useEffect(() => {
+    if (!embedded || window.parent === window) return undefined
+    const reportHeight = () => {
+      const height = Math.ceil(containerRef.current?.getBoundingClientRect().height || 0) + 48
+      if (!Number.isFinite(height) || height < 200) return
+      const message = { type: 'wildcard:afterhours:height:v1', area, height }
+      for (const origin of ['https://wildcarddev.com', 'https://www.wildcarddev.com']) {
+        window.parent.postMessage(message, origin)
+      }
+    }
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(reportHeight)
+    if (containerRef.current) observer?.observe(containerRef.current)
+    const frame = window.requestAnimationFrame(reportHeight)
+    window.addEventListener('resize', reportHeight)
+    return () => {
+      observer?.disconnect()
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', reportHeight)
+    }
+  }, [area, embedded])
+
   function changeView(next) {
     if (!VIEWS.includes(next)) return
     setView(next)
@@ -99,14 +124,14 @@ export default function MemberArea() {
   const name = area ? area[0].toUpperCase() + area.slice(1) : 'WildCard'
   const current = viewer?.items?.[viewer.index]
 
-  return <main className="vault">
-    <div className="vault__shell">
-      <header>
+  return <main className={embedded ? "vault vault--embedded" : "vault"}>
+    <div className="vault__shell" ref={containerRef}>
+      {!embedded && <header>
         <p className="vault__breadcrumb">♠ WildCard DEV · Approved Members</p>
         <h1 className="vault__title">{name}'s Private Vault</h1>
         <p className="vault__subtitle">Private galleries and reels for members approved by WildCard DEV.</p>
         {area === 'penny' && <p><a href="https://www.wildcarddev.com/penny/after-hours">← Back to Penny After Hours</a></p>}
-      </header>
+      </header>}
 
       {status !== 'approved' && <div className="vault__status">
         {status === 'checking' && <p role="status">Checking your Messenger membership…</p>}

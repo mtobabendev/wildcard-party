@@ -44,3 +44,9 @@
   .vault__tabs button { flex: 1 1 auto; }
   .vault__refresh { margin-left: 0; }
 }
+
+/* A compact presentation for the authenticated vault embedded inside the main After Hours page. */
+.vault--embedded { min-height: 0; padding: 12px clamp(10px, 2vw, 22px) 24px; background: transparent; }
+.vault--embedded .vault__shell { max-width: none; }
+.vault--embedded .vault__tabs { padding-top: 0; }
+.vault--embedded .vault__collection { margin-bottom: 1.5rem; }
