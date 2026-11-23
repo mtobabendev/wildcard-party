@@ -1,18 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { groupPrivateMedia } from './mediaCollections.js'
+import './MemberArea.css'
 
 const AREAS = ['penny', 'kandy', 'ashley']
-const STYLES = { background: '#140a21', color: '#fff0fb', minHeight: '100dvh', padding: 'clamp(20px, 5vw, 44px)', font: '16px/1.7 system-ui,sans-serif' }
+const VIEWS = ['galleries', 'reels']
+
+function mediaSrc(id) {
+  return '/api/afterhours/media?id=' + encodeURIComponent(id)
+}
+
+function initialView() {
+  const view = new URLSearchParams(window.location.search).get('view')
+  return VIEWS.includes(view) ? view : 'galleries'
+}
 
 export default function MemberArea() {
   const area = new URLSearchParams(window.location.search).get('area') || ''
   const [status, setStatus] = useState('checking')
   const [media, setMedia] = useState([])
+  const [view, setView] = useState(initialView)
   const [retry, setRetry] = useState(0)
+  const [viewer, setViewer] = useState(null)
+  const dialogRef = useRef(null)
+  const touchRef = useRef(null)
+
   useEffect(() => {
-    if (!AREAS.includes(area)) { setStatus('invalid'); return undefined }
+    if (!AREAS.includes(area)) { setStatus('invalid'); setMedia([]); return undefined }
     let cancelled = false
     async function check() {
       setStatus('checking')
+      setMedia([])
+      setViewer(null)
       try {
         const access = await fetch('/api/afterhours/access?area=' + area, {
           credentials: 'same-origin', cache: 'no-store',
@@ -24,7 +42,7 @@ export default function MemberArea() {
         const response = await fetch('/api/afterhours/media?area=' + area, {
           credentials: 'same-origin', cache: 'no-store',
         })
-        if (!response.ok) throw new Error('Media service unavailable')
+        if (!response.ok) throw new Error('Private media service unavailable')
         const result = await response.json()
         if (!cancelled) {
           setMedia(Array.isArray(result.media) ? result.media : [])
@@ -38,29 +56,132 @@ export default function MemberArea() {
     return () => { cancelled = true }
   }, [area, retry])
 
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (viewer && !dialog.open) dialog.showModal()
+    if (!viewer && dialog.open) dialog.close()
+  }, [viewer])
+
+  function changeView(next) {
+    if (!VIEWS.includes(next)) return
+    setView(next)
+    setViewer(null)
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', next)
+    window.history.replaceState(null, '', url)
+  }
+
+  function navigate(direction) {
+    setViewer(current => {
+      if (!current || current.items.length < 2) return current
+      return { ...current, index: (current.index + direction + current.items.length) % current.items.length }
+    })
+  }
+
+  function startTouch(event) {
+    if (event.touches.length !== 1) { touchRef.current = null; return }
+    touchRef.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }
+  }
+
+  function endTouch(event) {
+    const start = touchRef.current
+    touchRef.current = null
+    if (!start || !event.changedTouches.length) return
+    const dx = event.changedTouches[0].clientX - start.x
+    const dy = event.changedTouches[0].clientY - start.y
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.3) navigate(dx < 0 ? 1 : -1)
+  }
+
+  const groups = status === 'approved' ? groupPrivateMedia(media, view) : []
+  const photos = status === 'approved' ? media.filter(item => item?.type?.startsWith('image/')).length : 0
+  const reels = status === 'approved' ? media.filter(item => item?.type?.startsWith('video/')).length : 0
   const name = area ? area[0].toUpperCase() + area.slice(1) : 'WildCard'
-  return <main style={STYLES}>
-    <header style={{ maxWidth: 1000, margin: 'auto' }}>
-      <p style={{ letterSpacing: '.16em' }}>♠ WILDCARD DEV · MEMBERS</p>
-      <h1>{name}'s Private Vault</h1>
-      {status === 'checking' && <p role="status">Checking your Messenger membership…</p>}
-      {status === 'invalid' && <p>That area does not exist.</p>}
-      {status === 'login' && <p>Sign in to WildCard Messenger to enter.</p>}
-      {status === 'denied' && <p>Owner approval is required for this area.</p>}
-      {status === 'unavailable' && <p>Access could not be verified. This vault remains locked.</p>}
-      {status !== 'approved' && <div style={{ display: 'flex', gap: 16 }}>
-        <a href="/?app=messenger" target="_blank" rel="noopener noreferrer" style={{ color: '#ffbfe7' }}>Sign in to Messenger</a>
-        <button type="button" onClick={() => setRetry(i => i + 1)}>Check again</button>
+  const current = viewer?.items?.[viewer.index]
+
+  return <main className="vault">
+    <div className="vault__shell">
+      <header>
+        <p className="vault__breadcrumb">♠ WildCard DEV · Approved Members</p>
+        <h1 className="vault__title">{name}'s Private Vault</h1>
+        <p className="vault__subtitle">Private galleries and reels for members approved by WildCard DEV.</p>
+        {area === 'penny' && <p><a href="https://www.wildcarddev.com/penny/after-hours">← Back to Penny After Hours</a></p>}
+      </header>
+
+      {status !== 'approved' && <div className="vault__status">
+        {status === 'checking' && <p role="status">Checking your Messenger membership…</p>}
+        {status === 'invalid' && <p>This private area does not exist.</p>}
+        {status === 'login' && <p>Sign in to WildCard Messenger before entering.</p>}
+        {status === 'denied' && <p>Owner approval is required for this area.</p>}
+        {status === 'unavailable' && <p>Access could not be verified. This vault remains locked.</p>}
+        <a href="/?app=messenger" target="_blank" rel="noopener noreferrer">Open Messenger</a>
+        <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>
       </div>}
-      {status === 'approved' && (media.length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,270px),1fr))', gap: 20 }}>
-        {media.map(item => <figure key={item.id} style={{ margin: 0, padding: 12, border: '1px solid #805478', borderRadius: 14 }}>
-          {item.type.startsWith('video/') ? <video controls playsInline preload="none" style={{ width: '100%' }}
-            src={'/api/afterhours/media?id=' + item.id} /> :
-            <img style={{ width: '100%', height: 'auto' }} loading="lazy" alt={item.name}
-              src={'/api/afterhours/media?id=' + item.id} />}
-          <figcaption>{item.name}</figcaption>
-        </figure>)}
-      </div> : <p>Membership approved. The Owner has not uploaded private media for this area yet.</p>)}
-    </header>
+
+      {status === 'approved' && <>
+        <nav className="vault__tabs" aria-label="Private media categories">
+          <button type="button" aria-pressed={view === 'galleries'} onClick={() => changeView('galleries')}>
+            🖼️ Galleries <span>{photos}</span>
+          </button>
+          <button type="button" aria-pressed={view === 'reels'} onClick={() => changeView('reels')}>
+            ▶ Reels &amp; Videos <span>{reels}</span>
+          </button>
+          <button className="vault__refresh" type="button" onClick={() => setRetry(value => value + 1)}>
+            ↻ Refresh collection
+          </button>
+        </nav>
+        {groups.length === 0 && <p className="vault__empty">
+          {view === 'galleries'
+            ? 'No photographs are published here yet. New private photo uploads appear here automatically.'
+            : 'No videos are published here yet. New private video uploads appear here automatically.'}
+        </p>}
+        {groups.map(group => <section className="vault__collection" key={group.name} aria-label={group.name}>
+          <h2>{group.name}</h2>
+          <p>{group.items.length} {view === 'galleries' ? 'photos' : 'clips'} · Tap to enlarge. Swipe or use arrows to browse.</p>
+          <div className="vault__grid">
+            {group.items.map((item, index) => <button className="vault__tile" key={item.id}
+              type="button" onClick={() => setViewer({ items: group.items, index })}
+              aria-label={'Open ' + item.title}>
+              <span className="vault__image-wrap">
+                {view === 'galleries'
+                  ? <img loading="lazy" decoding="async" src={mediaSrc(item.id)} alt="" />
+                  : <video muted playsInline preload="metadata" src={mediaSrc(item.id)} aria-hidden="true" tabIndex={-1} />}
+                {view === 'reels' && <span className="vault__play" aria-hidden="true">▶</span>}
+              </span>
+              <span className="vault__tile-title">{item.title}</span>
+            </button>)}
+          </div>
+        </section>)}
+      </>}
+    </div>
+
+    <dialog className="vault__viewer" ref={dialogRef} aria-label="Private media viewer"
+      onClose={() => setViewer(null)}
+      onClick={event => { if (event.target === event.currentTarget) setViewer(null) }}
+      onKeyDown={event => {
+        if (event.target.tagName === 'VIDEO') return
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          navigate(event.key === 'ArrowRight' ? 1 : -1)
+        }
+      }}>
+      {status === 'approved' && current && <div className="vault__viewer-inner">
+        <header className="vault__viewer-header">
+          <strong>{current.title} · {current.collection}</strong>
+          <button type="button" onClick={() => setViewer(null)} aria-label="Close viewer">✕ Close</button>
+        </header>
+        <div className="vault__viewer-stage" onTouchStart={startTouch} onTouchEnd={endTouch}
+          onTouchCancel={() => { touchRef.current = null }}>
+          {current.type.startsWith('video/')
+            ? <video key={current.id} controls playsInline loop preload="metadata" src={mediaSrc(current.id)} aria-label={current.title} />
+            : <img key={current.id} src={mediaSrc(current.id)} alt={current.title} />}
+        </div>
+        <nav className="vault__viewer-footer" aria-label="Gallery navigation">
+          <button type="button" onClick={() => navigate(-1)} disabled={viewer.items.length < 2}>← Previous</button>
+          <span>{viewer.index + 1} / {viewer.items.length}</span>
+          <button type="button" onClick={() => navigate(1)} disabled={viewer.items.length < 2}>Next →</button>
+        </nav>
+      </div>}
+    </dialog>
   </main>
 }

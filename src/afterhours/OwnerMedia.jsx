@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createCollectionName } from './mediaCollections.js'
 
 const AREAS = ['penny', 'kandy', 'ashley']
 async function api(body) {
@@ -24,6 +25,7 @@ async function importApi(body) {
 export default function OwnerMedia() {
   const [area, setArea] = useState('penny')
   const [file, setFile] = useState(null)
+  const [collection, setCollection] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -63,7 +65,7 @@ export default function OwnerMedia() {
     setBusy(true)
     try {
       const { upload: ticket } = await api({
-        action: 'start', area, name: file.name,
+        action: 'start', area, name: createCollectionName(file.name, collection),
         contentType: file.type, byteSize: file.size,
       })
       const sent = await fetch(ticket.uploadUrl, {
@@ -71,7 +73,7 @@ export default function OwnerMedia() {
       })
       if (!sent.ok) throw new Error('Storage rejected the upload (' + sent.status + ').')
       await api({ action: 'finish', id: ticket.id })
-      setMessage('Secure upload verified. ' + file.name + ' is now available only to approved ' + area + ' members.')
+      setMessage('Secure upload verified. ' + file.name + ' is now available in the ' + (collection.trim() || 'Private Archive') + ' collection for approved ' + area + ' members.')
       setFile(null)
       event.currentTarget?.reset?.()
     } catch (error) {
@@ -83,7 +85,7 @@ export default function OwnerMedia() {
 
   return <section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
-    <p>Upload new private images or videos to the existing private storage. Public /static/ files do not become private until their public copies are removed and references are migrated.</p>
+    <p>Upload private images and videos. Use the optional collection name to create a gallery or reel series automatically. Leave it blank for the existing Private Archive. Public /static/ copies remain public until removed.</p>
     <form onSubmit={upload} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
       <label>Area{' '}
         <select aria-label="Private media area" value={area} onChange={e => setArea(e.target.value)}>
@@ -94,9 +96,14 @@ export default function OwnerMedia() {
         <input aria-label="Choose private media" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm" required
           onChange={e => setFile(e.target.files?.[0] || null)} />
       </label>
+      <label>Collection (optional){' '}
+        <input aria-label="Private media collection" type="text" value={collection} maxLength={48}
+          placeholder="e.g. Velvet After Dark" onChange={e => setCollection(e.target.value)} />
+      </label>
       <button disabled={busy || !file} type="submit">{busy ? 'Uploading…' : 'Upload to private vault'}</button>
     </form>
     <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #6a4d72' }}>
+      <p>Member view: <a href={'/afterhours-members.html?area=' + area} target="_blank" rel="noopener noreferrer" style={{ color: '#ffb8e4' }}>Open {area}'s private galleries and reels</a></p>
       <h3>Copy existing Penny media into the private vault</h3>
       <p>Owner only. Verify the production bucket is private, then transfer and verify 39 approved filenames directly from the existing public website. If interrupted, press again to resume. Public links are unchanged until the website gate deploys.</p>
       <button type="button" disabled={busy} onClick={importExistingPennyMedia}>
