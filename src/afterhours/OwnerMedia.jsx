@@ -11,11 +11,50 @@ async function api(body) {
   return payload
 }
 
+async function importApi(body) {
+  const response = await fetch('/api/afterhours/import-legacy', {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || 'Private import unavailable.')
+  return data
+}
+
 export default function OwnerMedia() {
   const [area, setArea] = useState('penny')
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+
+  async function importExistingPennyMedia() {
+    if (busy) return
+    setBusy(true)
+    setMessage('Checking private bucket permissions…')
+    try {
+      const privacy = await importApi({ action: 'probe' })
+      if (privacy.privateBucket !== true) throw new Error('Destination bucket is not verified private.')
+      const initial = await importApi({ action: 'status' })
+      if (initial.total !== 39 || !Array.isArray(initial.missing)) {
+        throw new Error('Expected media inventory was not available.')
+      }
+      let completed = initial.ready
+      for (const name of initial.missing) {
+        setMessage('Copying and verifying ' + name + ' (' + completed + '/39)…')
+        await importApi({ action: 'import', name })
+        completed++
+      }
+      const final = await importApi({ action: 'status' })
+      if (final.ready !== 39 || final.missing.length) {
+        throw new Error('Vault import incomplete. You can resume without duplicating ready files.')
+      }
+      setMessage('All 39 Penny media items are in the private vault. Existing public URLs remain live until the website gate is separately published.')
+    } catch (error) {
+      setMessage('Import stopped: ' + error.message + ' You can retry to resume missing files.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function upload(event) {
     event.preventDefault()
@@ -57,6 +96,13 @@ export default function OwnerMedia() {
       </label>
       <button disabled={busy || !file} type="submit">{busy ? 'Uploading…' : 'Upload to private vault'}</button>
     </form>
+    <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #6a4d72' }}>
+      <h3>Copy existing Penny media into the private vault</h3>
+      <p>Owner only. Verify the production bucket is private, then transfer and verify 39 approved filenames directly from the existing public website. If interrupted, press again to resume. Public links are unchanged until the website gate deploys.</p>
+      <button type="button" disabled={busy} onClick={importExistingPennyMedia}>
+        {busy ? 'Private media migration running…' : 'Verify bucket and import 39 Penny files'}
+      </button>
+    </div>
     {message && <p role="status">{message}</p>}
   </section>
 }
