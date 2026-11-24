@@ -2,6 +2,7 @@ import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/aut
 import { isOwner } from '../../lib/penny-owner.js'
 import { validArea, validAccountId } from '../../lib/afterhours-access.js'
 import { validCollectionLabel } from '../../src/afterhours/mediaCollections.js'
+import { decodeRelayBytes } from '../../lib/afterhours-upload-bytes.js'
 import { finishPrivateUpload, startPrivateUpload, privateMediaByName, validMediaSize, validMediaType } from '../../lib/afterhours-media.js'
 import { issueUploadToken, ownerFromUploadToken, revokeOwnerUploadTokens } from '../../lib/afterhours-agent-token.js'
 
@@ -94,6 +95,18 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true, area, exists: Boolean(existing), type: existing?.content_type || null
       })
+    }
+    if (body.action === 'relay') {
+      if (!ownerBrowser || !req.headers.origin) return res.status(403).json({ error: 'Owner browser required.' })
+      const area = validArea(body.area)
+      const contentType = validMediaType(body.contentType)
+      const bytes = decodeRelayBytes(body.base64, body.byteSize)
+      if (!area || !contentType || !validName(body.name) || !bytes) {
+        return res.status(400).json({ error: 'Invalid small-file upload.' })
+      }
+      const { relayPrivateUpload } = await import('../../lib/afterhours-media.js')
+      const done = await relayPrivateUpload({ ownerId: account.id, area, name: body.name, type: contentType, bytes })
+      return done ? res.status(200).json({ ok: true }) : res.status(409).json({ error: 'Upload not verified.' })
     }
     if (body.action === 'start') {
       const area = validArea(body.area)

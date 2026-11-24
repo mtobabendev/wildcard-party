@@ -4,6 +4,17 @@ import { createCollectionName } from './mediaCollections.js'
 const AREAS = ['penny', 'kandy', 'ashley']
 const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'])
 const MAX_BYTES = 150 * 1024 * 1024
+const RELAY_MAX_BYTES = 2 * 1024 * 1024
+
+function fileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read selected file.'))
+    reader.onabort = () => reject(new Error('File read cancelled.'))
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+    reader.readAsDataURL(file)
+  })
+}
 
 async function api(body) {
   const response = await fetch('/api/afterhours/media-admin', {
@@ -62,6 +73,10 @@ export default function OwnerMedia() {
           const existing = await api({ action: 'check', area, name })
           if (existing.exists) {
             next.push({ name: name || chosenName || file.name, status: 'Skipped (already exists)' })
+          } else if (file.size <= RELAY_MAX_BYTES) {
+            const result = await api({ action: 'relay', area, name, contentType: file.type, byteSize: file.size, base64: await fileBase64(file) })
+            if (result.ok !== true) throw new Error('Upload not verified.')
+            next.push({ name, status: 'Uploaded' })
           } else {
           const { upload: ticket } = await api({
             action: 'start', area, name, contentType: file.type, byteSize: file.size,
@@ -70,7 +85,8 @@ export default function OwnerMedia() {
             method: 'PUT', headers: { 'Content-Type': ticket.contentType }, body: file,
           })
           if (!sent.ok) throw new Error('Storage rejected upload (' + sent.status + ').')
-          await api({ action: 'finish', id: ticket.id })
+          const finished = await api({ action: 'finish', id: ticket.id })
+          if (finished.ok !== true) throw new Error('Upload not verified.')
           next.push({ name: name || chosenName || file.name, status: 'Uploaded' })
           }
         } catch (error) {
