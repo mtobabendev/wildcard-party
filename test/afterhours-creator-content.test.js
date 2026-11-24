@@ -31,3 +31,15 @@ test('owner writes require same origin and stale revisions cannot overwrite',asy
  res=response();await createContentHandler({...deps,owner:()=>true,save:async()=>null})(req('POST'),res);assert.equal(res.code,409)
  res=response();await createContentHandler({...deps,owner:()=>true})(req('POST'),res);assert.equal(res.code,200)
 })
+
+test('optional profile video accepts older records and validates catalog video types',()=>{
+ const legacy={bannerId:null,posts:[]}
+ assert.deepEqual(normalizeContent(legacy),emptyContent())
+ assert.equal(normalizeContent({...legacy,profileVideoId:'bad'}),null)
+ const content=normalizeContent({...legacy,profileVideoId:id})
+ assert.equal(content.profileVideoId,id)
+ assert.equal(contentMediaValid(content,[]),false)
+ assert.equal(contentMediaValid(content,[{id,type:'image/png'}]),false)
+ assert.equal(contentMediaValid(content,[{id,type:'video/mp4'}]),true)
+ assert.equal(contentMediaValid(content,[{id,type:'video/webm'}]),true)
+})

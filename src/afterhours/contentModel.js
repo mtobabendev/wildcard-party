@@ -1,10 +1,12 @@
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const emptyContent = () => ({ bannerId: null, posts: [] })
+export const emptyContent = () => ({ bannerId: null, profileVideoId: null, posts: [] })
 export function normalizeContent(value) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.posts) || value.posts.length > 30) return null
   const id = x => typeof x === 'string' && UUID.test(x)
   const text = (x,max) => typeof x === 'string' && x.length <= max
   if (value.bannerId !== null && !id(value.bannerId)) return null
+  const profileVideoId = value.profileVideoId ?? null
+  if (profileVideoId !== null && !id(profileVideoId)) return null
   const seen = new Set()
   const posts = []
   for (const p of value.posts) {
@@ -14,10 +16,11 @@ export function normalizeContent(value) {
     seen.add(p.id)
     posts.push({id:p.id,title:p.title.trim(),body:p.body,mediaId:p.mediaId,link:p.link})
   }
-  return {bannerId:value.bannerId,posts}
+  return {bannerId:value.bannerId,profileVideoId,posts}
 }
 export function contentMediaValid(content, media) {
   const items = new Map(media.map(item => [item.id,item.type]))
   return (!content.bannerId || Boolean(items.get(content.bannerId)?.startsWith('image/'))) &&
+    (!content.profileVideoId || ['video/mp4', 'video/webm'].includes(items.get(content.profileVideoId))) &&
     content.posts.every(p => !p.mediaId || /^(image|video)\//.test(items.get(p.mediaId) || ''))
 }

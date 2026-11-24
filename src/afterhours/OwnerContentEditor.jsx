@@ -17,7 +17,7 @@ export default function OwnerContentEditor() {
     setReady(false);setDirty(false);setMessage('Loading creator content…')
     fetch(api(area),{credentials:'same-origin',cache:'no-store'}).then(async r=>{
       const d=await r.json();if(!r.ok)throw Error(d.error||'Load failed')
-      if(active){setContent(d.content);setMedia(d.media);setRevision(d.revision);setReady(true);setMessage('')}
+      if(active){setContent({...emptyContent(),...d.content});setMedia(d.media);setRevision(d.revision);setReady(true);setMessage('')}
     }).catch(e=>{if(active)setMessage(e.message)})
     return ()=>{active=false}
   },[area,reload])
@@ -32,8 +32,8 @@ export default function OwnerContentEditor() {
     }catch(e){setMessage(e.message)}finally{setBusy(false)}
   }
   const switchArea=e=>{if(!dirty||window.confirm('Discard unsaved edits?'))setArea(e.target.value)}
-  const pick=(value,onChange,images=false)=><select value={value||''} onChange={e=>onChange(e.target.value||null)} disabled={busy} style={{maxWidth:'100%',width:'100%'}}>
-    <option value="">None / default</option>{media.filter(m=>!images||m.type.startsWith('image/')).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+  const pick=(value,onChange,kind='all')=><select value={value||''} onChange={e=>onChange(e.target.value||null)} disabled={busy} style={{maxWidth:'100%',width:'100%'}}>
+    <option value="">None / default</option>{media.filter(m=>kind==='all'||(kind==='image'&&m.type.startsWith('image/'))||(kind==='video'&&['video/mp4','video/webm'].includes(m.type))).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
     {value&&!media.some(m=>m.id===value)&&<option value={value}>Unavailable — choose another</option>}
   </select>
   return <section style={{maxWidth:920,margin:'16px auto',padding:16,border:'1px solid #99688f',borderRadius:16,background:'#22152c',color:'#fff'}}>
@@ -43,7 +43,12 @@ export default function OwnerContentEditor() {
     <p><a href={'/afterhours-members.html?area='+area} target="_blank" rel="noopener noreferrer">Manage collections (move or remove)</a>{' · '}<a href={'https://www.wildcarddev.com/'+area+'/after-hours'} target="_blank" rel="noopener noreferrer">Open creator page</a></p>
     <p role="status">{message}</p>
     {ready&&<fieldset disabled={busy} style={{border:0,padding:0,minWidth:0}}>
-      <h3>Profile banner</h3><label>Choose an existing image {pick(content.bannerId,id=>edit(c=>({...c,bannerId:id})),true)}</label>
+      <h3>Profile banner</h3><label>Choose an existing image {pick(content.bannerId,id=>edit(c=>({...c,bannerId:id})),'image')}</label>
+      {area==='penny'&&<section id="profile-video" aria-labelledby="profile-video-title" style={{scrollMarginTop:16,margin:'18px 0'}}>
+        <h3 id="profile-video-title">Profile video</h3>
+        <p>Optional video beneath the Profile heading. Choose None / default to hide the player.</p>
+        <label>Video {pick(content.profileVideoId,id=>edit(c=>({...c,profileVideoId:id})),'video')}</label>
+      </section>}
       <h3>Posts (newest first)</h3>
       <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:''},...c.posts]}))}>+ New post</button>
       {content.posts.map(p=><div key={p.id} style={{display:'grid',gap:8,margin:'12px 0',padding:12,border:'1px solid #785879',borderRadius:8}}>
