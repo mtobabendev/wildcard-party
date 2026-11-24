@@ -39,6 +39,7 @@ async function importApi(body) {
 
 export default function OwnerMedia() {
   const [area, setArea] = useState('penny')
+  const [mediaRevision, setMediaRevision] = useState(0)
   const [files, setFiles] = useState([])
   const [fileNames, setFileNames] = useState([])
   const [collection, setCollection] = useState('')
@@ -102,6 +103,7 @@ export default function OwnerMedia() {
       setMessage(uploaded + ' uploaded, ' + skipped + ' already present, ' + failed.length + ' failed.')
       setFiles(failed)
       setFileNames(failedNames)
+      if (uploaded || skipped) setMediaRevision(value => value + 1)
     } finally {
       setBusy(false)
       setProgress('')
@@ -149,10 +151,10 @@ export default function OwnerMedia() {
       if (final.ready !== 39 || final.missing.length) throw new Error('Import incomplete; retry to resume.')
       setMessage('All 39 Penny media items verified in the private vault. Public URLs are unchanged.')
     } catch (error) { setMessage('Import stopped: ' + error.message) }
-    finally { setBusy(false) }
+    finally { setBusy(false); setMediaRevision(value => value + 1) }
   }
 
-  return <><OwnerContentEditor /><section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
+  return <><OwnerContentEditor mediaRevision={mediaRevision} /><section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
     <p>Upload multiple private photos and videos directly from your phone or computer. Choose the area and collection once. Existing files are skipped; failed files remain selected for retry.</p>
     <form onSubmit={upload} style={{ display: 'grid', gap: 12 }}>
