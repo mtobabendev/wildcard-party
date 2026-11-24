@@ -118,7 +118,14 @@ export default function MemberArea() {
     if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.3) navigate(dx < 0 ? 1 : -1)
   }
 
-  const groups = status === 'approved' ? groupPrivateMedia(media, view) : []
+  // Route the existing Penny vault video into its intended collection without
+  // changing its stored name, storage key, access grants, or upload workflow.
+  const galleryMedia = area === 'penny'
+    ? media.map(item => item.name === '4508.webm'
+      ? { ...item, name: 'wc-vault__A Night Out__4508.webm' }
+      : item)
+    : media
+  const groups = status === 'approved' ? groupPrivateMedia(galleryMedia, view) : []
   const photos = status === 'approved' ? media.filter(item => item?.type?.startsWith('image/')).length : 0
   const reels = status === 'approved' ? media.filter(item => item?.type?.startsWith('video/')).length : 0
   const name = area ? area[0].toUpperCase() + area.slice(1) : 'WildCard'
