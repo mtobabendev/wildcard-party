@@ -17,6 +17,11 @@ export function createCollectionName(filename, collection) {
   return PREFIX + label + '__' + original.slice(0, Math.max(1, remaining))
 }
 
+export function validCollectionLabel(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9 _-]{1,48}$/.test(value)
+    && value.trim() === value && /[a-zA-Z0-9]/.test(value)
+}
+
 export function describePrivateMedia(item) {
   const name = typeof item?.name === 'string' ? item.name : ''
   const marker = name.startsWith(PREFIX) ? name.slice(PREFIX.length) : ''
@@ -24,7 +29,7 @@ export function describePrivateMedia(item) {
   const label = separator > 0 ? marker.slice(0, separator) : ''
   const file = separator > 0 ? marker.slice(separator + 2) : name
   const valid = /^[a-zA-Z0-9 _-]{1,48}$/.test(label) && Boolean(file)
-  const collection = valid ? label : ARCHIVE
+  const collection = validCollectionLabel(item?.collection) ? item.collection : valid ? label : ARCHIVE
   const displayName = valid ? file : name
   const title = displayName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Untitled'
   return { ...item, collection, displayName, title }

@@ -1,6 +1,7 @@
 import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
-import { validArea } from '../../lib/afterhours-access.js'
+import { validArea, validAccountId } from '../../lib/afterhours-access.js'
+import { validCollectionLabel } from '../../src/afterhours/mediaCollections.js'
 import { finishPrivateUpload, startPrivateUpload, privateMediaByName, validMediaSize, validMediaType } from '../../lib/afterhours-media.js'
 import { issueUploadToken, ownerFromUploadToken, revokeOwnerUploadTokens } from '../../lib/afterhours-agent-token.js'
 
@@ -58,6 +59,18 @@ export default async function handler(req, res) {
     // use a narrowly scoped 90-day credential valid ONLY in this API.
     const account = ownerBrowser ? browserAccount : pairedAccount
     if (!isOwner(account, process.env)) return res.status(403).json({ error: 'Owner only.' })
+
+    // Gallery moves require the Owner browser, never a workstation upload token.
+    if (body.action === 'move') {
+      if (!ownerBrowser || !req.headers.origin) return res.status(403).json({ error: 'Owner browser required.' })
+      const area = validArea(body.area)
+      if (!area || !validAccountId(body.id) || !validName(body.name) || !validCollectionLabel(body.collection)) {
+        return res.status(400).json({ error: 'Invalid media or gallery name.' })
+      }
+      const { movePrivateMedia } = await import('../../lib/afterhours-media.js')
+      const moved = await movePrivateMedia({ area, id: body.id, name: body.name, collection: body.collection })
+      return moved ? res.status(200).json({ ok: true, collection: body.collection }) : res.status(404).json({ error: 'Media not found.' })
+    }
 
     // Removal is restricted to an authenticated Owner browser, not upload tokens.
     if (body.action === 'remove') {

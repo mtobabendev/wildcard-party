@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { groupPrivateMedia } from './mediaCollections.js'
+import { groupPrivateMedia, validCollectionLabel } from './mediaCollections.js'
 import './MemberArea.css'
 
 const AREAS = ['penny', 'kandy', 'ashley']
@@ -16,6 +16,32 @@ function initialView() {
   return VIEWS.includes(view) ? view : 'galleries'
 }
 
+function MoveMediaControl({ current, galleries, moving, onMove }) {
+  const [choice, setChoice] = useState('')
+  const [newName, setNewName] = useState('')
+  const destination = choice === 'new' ? newName.trim() : choice.startsWith('existing:') ? choice.slice(9) : ''
+  return <form onSubmit={event => {
+    event.preventDefault()
+    if (validCollectionLabel(destination) && destination !== current.collection && !moving) onMove(destination)
+  }} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+    <label>Move to gallery{' '}
+      <select aria-label="Move to gallery" value={choice} disabled={moving} onChange={event => setChoice(event.target.value)}>
+        <option value="">Choose gallery</option>
+        {galleries.filter(name => name !== current.collection && validCollectionLabel(name)).map(name =>
+          <option key={name} value={'existing:' + name}>{name}</option>)}
+        <option value="new">+ New gallery</option>
+      </select>
+    </label>
+    {choice === 'new' && <input aria-label="New gallery name" placeholder="New gallery name" value={newName}
+      maxLength={48} disabled={moving} onChange={event => setNewName(event.target.value)} />}
+    <button type="submit" disabled={moving || !validCollectionLabel(destination) || destination === current.collection}>
+      {moving ? 'Moving…' : 'Move'}
+    </button>
+    {choice === 'new' && newName.trim() && !validCollectionLabel(destination) &&
+      <small>Use letters, numbers, spaces, hyphens or underscores (1–48 characters).</small>}
+  </form>
+}
+
 export default function MemberArea() {
   const area = new URLSearchParams(window.location.search).get('area') || ''
   const embedded = new URLSearchParams(window.location.search).get('embed') === '1'
@@ -26,6 +52,8 @@ export default function MemberArea() {
   const [viewer, setViewer] = useState(null)
   const [owner, setOwner] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [moving, setMoving] = useState(false)
+  const [moveMessage, setMoveMessage] = useState('')
   const dialogRef = useRef(null)
   const touchRef = useRef(null)
   const containerRef = useRef(null)
@@ -104,7 +132,7 @@ export default function MemberArea() {
   }
 
   async function removeCurrent() {
-    if (!owner || removing || !current) return
+    if (!owner || removing || moving || !current) return
     if (!window.confirm('Remove ' + current.displayName + ' from ' + current.collection + '?')) return
     setRemoving(true)
     try {
@@ -123,7 +151,31 @@ export default function MemberArea() {
     }
   }
 
+  async function moveCurrent(collection) {
+    if (!owner || moving || removing || !current || !validCollectionLabel(collection) || collection === current.collection) return
+    const item = current
+    setMoving(true)
+    setMoveMessage('')
+    try {
+      const response = await fetch('/api/afterhours/media-admin', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'move', area, id: item.id, name: item.name, collection }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok || result.ok !== true) throw new Error(result.error || 'Move failed.')
+      setMedia(items => items.map(raw => raw.id === item.id ? { ...raw, collection: result.collection } : raw))
+      setViewer(null)
+      setMoveMessage('Moved to ' + result.collection + '.')
+    } catch (error) {
+      window.alert(error.message || 'Move failed. Refresh to check the gallery.')
+    } finally {
+      setMoving(false)
+    }
+  }
+
   function navigate(direction) {
+    if (moving || removing) return
     setViewer(current => {
       if (!current || current.items.length < 2) return current
       return { ...current, index: (current.index + direction + current.items.length) % current.items.length }
@@ -149,6 +201,7 @@ export default function MemberArea() {
   const reels = status === 'approved' ? media.filter(item => item?.type?.startsWith('video/')).length : 0
   const name = area ? area[0].toUpperCase() + area.slice(1) : 'WildCard'
   const current = viewer?.items?.[viewer.index]
+  const galleries = [...new Set(['Private Archive', ...groupPrivateMedia(media, 'galleries').map(group => group.name)])]
 
   return <main className={embedded ? "vault vault--embedded" : "vault"}>
     <div className="vault__shell" ref={containerRef}>
@@ -170,6 +223,7 @@ export default function MemberArea() {
       </div>}
 
       {status === 'approved' && <>
+        {moveMessage && <p role="status">{moveMessage}</p>}
         {!embedded && <nav className="vault__tabs" aria-label="Private media categories">
           <button type="button" aria-pressed={view === 'galleries'} onClick={() => changeView('galleries')}>
             🖼️ Galleries <span>{photos}</span>
@@ -210,7 +264,7 @@ export default function MemberArea() {
       onClose={() => setViewer(null)}
       onClick={event => { if (event.target === event.currentTarget) setViewer(null) }}
       onKeyDown={event => {
-        if (event.target.tagName === 'VIDEO') return
+        if (['VIDEO', 'INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName)) return
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
           event.preventDefault()
           navigate(event.key === 'ArrowRight' ? 1 : -1)
@@ -219,9 +273,10 @@ export default function MemberArea() {
       {status === 'approved' && current && <div className="vault__viewer-inner">
         <header className="vault__viewer-header">
           <strong>{current.title} · {current.collection}</strong>
-          {owner && <button type="button" disabled={removing} onClick={removeCurrent}>{removing ? "Removing…" : "Remove clip"}</button>}
+          {owner && <button type="button" disabled={removing || moving} onClick={removeCurrent}>{removing ? "Removing…" : "Remove clip"}</button>}
           <button type="button" onClick={() => setViewer(null)} aria-label="Close viewer">✕ Close</button>
         </header>
+        {owner && <MoveMediaControl key={current.id} current={current} galleries={galleries} moving={moving || removing} onMove={moveCurrent} />}
         <div className="vault__viewer-stage" onTouchStart={startTouch} onTouchEnd={endTouch}
           onTouchCancel={() => { touchRef.current = null }}>
           {current.type.startsWith('video/')
