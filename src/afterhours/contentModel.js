@@ -18,6 +18,6 @@ export function normalizeContent(value) {
 }
 export function contentMediaValid(content, media) {
   const items = new Map(media.map(item => [item.id,item.type]))
-  return (!content.bannerId || items.get(content.bannerId)?.startsWith('image/')) &&
+  return (!content.bannerId || Boolean(items.get(content.bannerId)?.startsWith('image/'))) &&
     content.posts.every(p => !p.mediaId || /^(image|video)\//.test(items.get(p.mediaId) || ''))
 }
