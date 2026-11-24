@@ -37,7 +37,7 @@ test('member gallery fetches through existing authorized APIs and hides all medi
   assert.match(view, /cache: 'no-store'/)
   assert.match(view, /credentials: 'same-origin'/)
   assert.match(view, /aria-pressed={view === 'reels'}/)
-  assert.match(owner, /name: createCollectionName\(file\.name, collection\)/)
+  assert.match(owner, /const name = createCollectionName\(file\.name, collection\)/)
   assert.match(owner, /action: 'finish', id: ticket\.id/)
 })
 
