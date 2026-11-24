@@ -35,7 +35,7 @@ export function groupPrivateMedia(media, type) {
   const groups = new Map()
   for (const raw of media) {
     if (!raw || typeof raw.id !== 'string' || typeof raw.type !== 'string') continue
-    if (!raw.type.startsWith(type === 'reels' ? 'video/' : 'image/')) continue
+    if (type === 'reels' ? !raw.type.startsWith('video/') : !raw.type.startsWith('image/') && !raw.type.startsWith('video/')) continue
     const item = describePrivateMedia(raw)
     if (!groups.has(item.collection)) groups.set(item.collection, [])
     groups.get(item.collection).push(item)
