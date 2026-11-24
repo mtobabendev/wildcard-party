@@ -4,6 +4,8 @@ import './MemberArea.css'
 
 const AREAS = ['penny', 'kandy', 'ashley']
 const VIEWS = ['galleries', 'reels']
+// Page assets remain available by filename, but are not vault content.
+const PENNY_FRIEND_ASSETS = new Set(["KandyOnlyFans2.jpg","mia-slides.webp","brooke-slides.webp","aisha-moon-slides.webp","angel-jessy-slides.webp","lacie-heart-slides.webp","snow-bird-slides.webp","evemarie-slides.webp","karley-stokes-slides.webp"])
 
 function mediaSrc(id) {
   return '/api/afterhours/media?id=' + encodeURIComponent(id)
@@ -51,7 +53,7 @@ export default function MemberArea() {
         if (!response.ok) throw new Error('Private media service unavailable')
         const result = await response.json()
         if (!cancelled) {
-          setMedia(Array.isArray(result.media) ? result.media : [])
+          setMedia(Array.isArray(result.media) ? result.media.filter(item => area !== 'penny' || !PENNY_FRIEND_ASSETS.has(item?.name)) : [])
           setStatus('approved')
         }
       } catch {
