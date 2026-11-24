@@ -28,6 +28,7 @@ async function importApi(body) {
 export default function OwnerMedia() {
   const [area, setArea] = useState('penny')
   const [files, setFiles] = useState([])
+  const [fileNames, setFileNames] = useState([])
   const [collection, setCollection] = useState('')
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState([])
@@ -44,18 +45,23 @@ export default function OwnerMedia() {
     setMessage('')
     const next = []
     const failed = []
+    const failedNames = []
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-        const name = createCollectionName(file.name, collection)
-        setProgress((i + 1) + '/' + files.length + ': ' + file.name)
+        const chosenName = (fileNames[i] || '').trim()
+        const name = createCollectionName(chosenName, collection)
+        setProgress((i + 1) + '/' + files.length + ': ' + chosenName)
         try {
+          if (!chosenName || !/^[^\\/\\\\\x00-\x1f\x7f]+$/.test(chosenName) || chosenName.length > 180 || !/\.(jpg|jpeg|png|webp|gif|mp4|webm)$/i.test(chosenName)) {
+            throw new Error('Enter a valid stored filename with its extension.')
+          }
           if (!TYPES.has(file.type) || file.size < 1 || file.size > MAX_BYTES) {
             throw new Error('Unsupported file type or file exceeds 150 MB.')
           }
           const existing = await api({ action: 'check', area, name })
           if (existing.exists) {
-            next.push({ name: file.name, status: 'Skipped (already exists)' })
+            next.push({ name: name || chosenName || file.name, status: 'Skipped (already exists)' })
           } else {
           const { upload: ticket } = await api({
             action: 'start', area, name, contentType: file.type, byteSize: file.size,
@@ -65,11 +71,12 @@ export default function OwnerMedia() {
           })
           if (!sent.ok) throw new Error('Storage rejected upload (' + sent.status + ').')
           await api({ action: 'finish', id: ticket.id })
-          next.push({ name: file.name, status: 'Uploaded' })
+          next.push({ name: name || chosenName || file.name, status: 'Uploaded' })
           }
         } catch (error) {
-          next.push({ name: file.name, status: 'Failed: ' + error.message })
+          next.push({ name: name || chosenName || file.name, status: 'Failed: ' + error.message })
           failed.push(file)
+          failedNames.push(chosenName)
         }
         setResults([...next])
       }
@@ -77,6 +84,7 @@ export default function OwnerMedia() {
       const skipped = next.filter(item => item.status.startsWith('Skipped')).length
       setMessage(uploaded + ' uploaded, ' + skipped + ' already present, ' + failed.length + ' failed.')
       setFiles(failed)
+      setFileNames(failedNames)
     } finally {
       setBusy(false)
       setProgress('')
@@ -138,9 +146,18 @@ export default function OwnerMedia() {
       </label>
       <label>Files (select multiple){' '}
         <input aria-label="Choose private media" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm" multiple disabled={busy}
-          onChange={e => { setFiles(Array.from(e.target.files || [])); setResults([]); setMessage('') }} />
+          onChange={e => { const selected = Array.from(e.target.files || []); setFiles(selected); setFileNames(selected.map(file => file.name)); setResults([]); setMessage('') }} />
       </label>
       <p role="status">{files.length} file(s) ready{busy ? ' — uploading...' : ''}</p>
+      {files.length > 0 && <div style={{ display: 'grid', gap: 8 }}>
+        <p>Stored filenames (editable). Android may supply a numeric filename. Enter the intended name, including its extension, before uploading.</p>
+        {files.map((file, i) => <label key={i} style={{ display: 'grid', gap: 4 }}>
+          <span>File {i + 1}: {file.name}</span>
+          <input type="text" aria-label={'Stored filename ' + (i + 1)} value={fileNames[i] ?? ''} maxLength={180} disabled={busy} required
+            style={{ width: '100%', boxSizing: 'border-box' }} onChange={e => setFileNames(previous => previous.map((name, index) => index === i ? e.target.value : name))} />
+          <small>Will be stored as: {createCollectionName(fileNames[i] || '', collection) || 'Enter a filename'}</small>
+        </label>)}
+      </div>}
       <label>Collection (optional){' '}
         <input aria-label="Private media collection" type="text" value={collection} maxLength={48} disabled={busy}
           placeholder="e.g. Velvet After Dark" onChange={e => setCollection(e.target.value)} />
