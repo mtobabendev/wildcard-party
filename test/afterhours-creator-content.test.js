@@ -43,3 +43,16 @@ test('optional profile video accepts older records and validates catalog video t
  assert.equal(contentMediaValid(content,[{id,type:'video/mp4'}]),true)
  assert.equal(contentMediaValid(content,[{id,type:'video/webm'}]),true)
 })
+
+test('eight orbit slots support legacy defaults, blank cards and catalog images',()=>{
+ const legacy={bannerId:null,posts:[]}
+ assert.deepEqual(normalizeContent(legacy).orbitCards,Array(8).fill(null))
+ assert.equal(normalizeContent({...legacy,orbitCards:[id]}),null)
+ assert.equal(normalizeContent({...legacy,orbitCards:Array(8).fill('invalid')}),null)
+ const cards=[id,'blank',null,null,null,null,null,null]
+ const content=normalizeContent({...legacy,orbitCards:cards})
+ assert.deepEqual(content.orbitCards,cards)
+ assert.equal(contentMediaValid(content,[{id,type:'video/mp4'}]),false)
+ assert.equal(contentMediaValid(content,[{id,type:'image/png'}]),true)
+ assert.equal(contentMediaValid(normalizeContent({...legacy,orbitCards:Array(8).fill('blank')}),[]),true)
+})

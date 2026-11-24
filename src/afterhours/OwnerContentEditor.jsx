@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { emptyContent } from './contentModel.js'
+import { emptyContent, emptyOrbitCards } from './contentModel.js'
 const AREAS=['penny','kandy','ashley']
 const api=(area)=>'/api/afterhours/creator-content?area='+area
 export default function OwnerContentEditor({ mediaRevision = 0 }) {
@@ -70,6 +70,22 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
         <h3 id="profile-video-title">Profile video</h3>
         <p>Optional video beneath the Profile heading. Choose None / default to hide the player.</p>
         <label>Video {pick(content.profileVideoId,id=>edit(c=>({...c,profileVideoId:id})),'video')}</label>
+      </section>}
+      {area==='penny'&&<section id="orbit-cards" aria-labelledby="orbit-cards-title" style={{margin:'18px 0',scrollMarginTop:16}}>
+        <h3 id="orbit-cards-title">Spinner cards and matching tiles (01–08)</h3>
+        <p>Each selection updates the card, its matching tile, and the card viewer together. The separate Photos gallery is unchanged.</p>
+        <div style={{display:'grid',gap:12}}>
+          {(content.orbitCards ?? emptyOrbitCards()).map((id,index)=><label key={index} style={{display:'grid',gap:4}}>
+            Card / Photo {String(index+1).padStart(2,'0')}
+            <select value={id??''} onChange={e=>edit(c=>({...c,orbitCards:(c.orbitCards??emptyOrbitCards()).map((v,i)=>i===index?(e.target.value||null):v)}))} style={{width:'100%',maxWidth:'100%'}}>
+              <option value="">Keep original</option>
+              <option value="blank">Blank card</option>
+              {media.filter(m=>m.type.startsWith('image/')).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+              {id&&id!=='blank'&&!media.some(m=>m.id===id)&&<option value={id}>Unavailable — choose another</option>}
+            </select>
+          </label>)}
+        </div>
+        <button type="button" style={{marginTop:12}} onClick={()=>edit(c=>({...c,orbitCards:Array(8).fill('blank')}))}>Clear all eight cards</button>
       </section>}
       <h3>Posts (newest first)</h3>
       <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:''},...c.posts]}))}>+ New post</button>
