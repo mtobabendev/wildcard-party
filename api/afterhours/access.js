@@ -24,7 +24,7 @@ export function createAccessHandler({
       if (!account) return res.status(401).json({ allowed: false, reason: 'login' })
       const allowed = ownerCheck(account, env) || await hasGrant(account.id, area)
       if (!allowed) return res.status(403).json({ allowed: false, reason: 'not-approved' })
-      return res.status(200).json({ allowed: true, area, handle: account.handle })
+      return res.status(200).json({ allowed: true, area, handle: account.handle, owner: ownerCheck(account, env) })
     } catch (error) {
       if (databaseNotConfigured(error)) {
         return res.status(503).json({ error: 'Membership database unavailable.' })

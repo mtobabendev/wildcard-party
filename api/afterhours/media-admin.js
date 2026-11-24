@@ -59,6 +59,19 @@ export default async function handler(req, res) {
     const account = ownerBrowser ? browserAccount : pairedAccount
     if (!isOwner(account, process.env)) return res.status(403).json({ error: 'Owner only.' })
 
+    // Removal is restricted to an authenticated Owner browser, not upload tokens.
+    if (body.action === 'remove') {
+      if (!ownerBrowser || !req.headers.origin) return res.status(403).json({ error: 'Owner browser required.' })
+      const area = validArea(body.area)
+      if (!area || !validName(body.name) || typeof body.id !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.id)) {
+        return res.status(400).json({ error: 'Invalid removal target.' })
+      }
+      const { removePrivateMedia } = await import('../../lib/afterhours-media.js')
+      const removed = await removePrivateMedia({ area, id: body.id, name: body.name })
+      return removed ? res.status(200).json({ ok: true }) : res.status(404).json({ error: 'Media not found.' })
+    }
+
     if (body.action === 'check') {
       const area = validArea(body.area)
       if (!area || (body.name != null && !validName(body.name))) {
