@@ -144,7 +144,7 @@ export default function MemberArea() {
       </div>}
 
       {status === 'approved' && <>
-        <nav className="vault__tabs" aria-label="Private media categories">
+        {!embedded && <nav className="vault__tabs" aria-label="Private media categories">
           <button type="button" aria-pressed={view === 'galleries'} onClick={() => changeView('galleries')}>
             🖼️ Galleries <span>{photos}</span>
           </button>
@@ -154,24 +154,24 @@ export default function MemberArea() {
           <button className="vault__refresh" type="button" onClick={() => setRetry(value => value + 1)}>
             ↻ Refresh collection
           </button>
-        </nav>
+        </nav>}
         {groups.length === 0 && <p className="vault__empty">
           {view === 'galleries'
-            ? 'No photographs are published here yet. New private photo uploads appear here automatically.'
+            ? 'No media is published in this gallery yet. New private gallery uploads appear here automatically.'
             : 'No videos are published here yet. New private video uploads appear here automatically.'}
         </p>}
         {groups.map(group => <section className="vault__collection" key={group.name} aria-label={group.name}>
           <h2>{group.name}</h2>
-          <p>{group.items.length} {view === 'galleries' ? 'photos' : 'clips'} · Tap to enlarge. Swipe or use arrows to browse.</p>
+          <p>{group.items.length} {view === 'galleries' ? 'items' : 'clips'} · Tap to enlarge. Swipe or use arrows to browse.</p>
           <div className="vault__grid">
             {group.items.map((item, index) => <button className="vault__tile" key={item.id}
               type="button" onClick={() => setViewer({ items: group.items, index })}
               aria-label={'Open ' + item.title}>
               <span className="vault__image-wrap">
-                {view === 'galleries'
+                {item.type.startsWith('image/')
                   ? <img loading="lazy" decoding="async" src={mediaSrc(item.id)} alt="" />
                   : <video muted playsInline preload="metadata" src={mediaSrc(item.id)} aria-hidden="true" tabIndex={-1} />}
-                {view === 'reels' && <span className="vault__play" aria-hidden="true">▶</span>}
+                {item.type.startsWith('video/') && <span className="vault__play" aria-hidden="true">▶</span>}
               </span>
               <span className="vault__tile-title">{item.title}</span>
             </button>)}

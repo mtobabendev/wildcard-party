@@ -14,7 +14,7 @@ test('collection naming uses the existing private media display_name without pat
   assert.ok(createCollectionName('a'.repeat(190) + '.webm', 'Very Long Series').length <= 180)
 })
 
-test('media is separated into galleries and reels without exposing unapproved media', () => {
+test('galleries mix photos and videos while reels remain video-only without exposing unapproved media', () => {
   const inventory = [
     { id: 'p', name: 'wc-vault__Pink Nights__portrait.webp', type: 'image/webp' },
     { id: 'v', name: 'wc-vault__Pink Nights__clip.webm', type: 'video/webm' },
@@ -22,9 +22,10 @@ test('media is separated into galleries and reels without exposing unapproved me
   ]
   const photos = groupPrivateMedia(inventory, 'galleries')
   const reels = groupPrivateMedia(inventory, 'reels')
-  assert.deepEqual(photos.map(g => [g.name, g.items.length]), [['Pink Nights', 1], ['Private Archive', 1]])
+  assert.deepEqual(photos.map(g => [g.name, g.items.length]), [['Pink Nights', 2], ['Private Archive', 1]])
   assert.deepEqual(reels.map(g => [g.name, g.items.length]), [['Pink Nights', 1]])
   assert.equal(reels[0].items[0].title, 'clip')
+  assert.deepEqual(photos[0].items.map(item => item.type), ['image/webp', 'video/webm'])
 })
 
 test('member gallery fetches through existing authorized APIs and hides all media until approved', () => {
