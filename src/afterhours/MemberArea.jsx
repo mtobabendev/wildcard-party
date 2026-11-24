@@ -22,6 +22,8 @@ export default function MemberArea() {
   const [view, setView] = useState(initialView)
   const [retry, setRetry] = useState(0)
   const [viewer, setViewer] = useState(null)
+  const [owner, setOwner] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const dialogRef = useRef(null)
   const touchRef = useRef(null)
   const containerRef = useRef(null)
@@ -41,6 +43,8 @@ export default function MemberArea() {
           if (!cancelled) setStatus(access.status === 401 ? 'login' : access.status === 403 ? 'denied' : 'unavailable')
           return
         }
+        const membership = await access.json()
+        if (!cancelled) setOwner(membership.owner === true)
         const response = await fetch('/api/afterhours/media?area=' + area, {
           credentials: 'same-origin', cache: 'no-store',
         })
@@ -95,6 +99,26 @@ export default function MemberArea() {
     const url = new URL(window.location.href)
     url.searchParams.set('view', next)
     window.history.replaceState(null, '', url)
+  }
+
+  async function removeCurrent() {
+    if (!owner || removing || !current) return
+    if (!window.confirm('Remove ' + current.displayName + ' from ' + current.collection + '?')) return
+    setRemoving(true)
+    try {
+      const response = await fetch('/api/afterhours/media-admin', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', area, id: current.id, name: current.name }),
+      })
+      if (!response.ok) throw new Error('Removal failed')
+      setViewer(null)
+      setRetry(value => value + 1)
+    } catch {
+      window.alert('Removal failed. No successful removal was confirmed.')
+    } finally {
+      setRemoving(false)
+    }
   }
 
   function navigate(direction) {
@@ -193,6 +217,7 @@ export default function MemberArea() {
       {status === 'approved' && current && <div className="vault__viewer-inner">
         <header className="vault__viewer-header">
           <strong>{current.title} · {current.collection}</strong>
+          {owner && <button type="button" disabled={removing} onClick={removeCurrent}>{removing ? "Removing…" : "Remove clip"}</button>}
           <button type="button" onClick={() => setViewer(null)} aria-label="Close viewer">✕ Close</button>
         </header>
         <div className="vault__viewer-stage" onTouchStart={startTouch} onTouchEnd={endTouch}
