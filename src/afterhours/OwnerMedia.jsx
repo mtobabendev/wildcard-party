@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import OwnerContentEditor from './OwnerContentEditor.jsx'
 import { createCollectionName } from './mediaCollections.js'
 
 const AREAS = ['penny', 'kandy', 'ashley']
@@ -151,7 +152,7 @@ export default function OwnerMedia() {
     finally { setBusy(false) }
   }
 
-  return <section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
+  return <><OwnerContentEditor /><section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
     <p>Upload multiple private photos and videos directly from your phone or computer. Choose the area and collection once. Existing files are skipped; failed files remain selected for retry.</p>
     <form onSubmit={upload} style={{ display: 'grid', gap: 12 }}>
@@ -201,5 +202,5 @@ export default function OwnerMedia() {
       <p>Owner only. Verifies the private bucket, then imports missing approved media. Existing public URLs are unchanged.</p>
       <button type="button" disabled={busy} onClick={importExistingPennyMedia}>Verify bucket and import 39 Penny files</button>
     </details>
-  </section>
+  </section></>
 }
