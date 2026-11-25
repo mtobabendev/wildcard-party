@@ -1,4 +1,5 @@
-import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/auth-db.js'
+import { mediaDiagnostic } from '../../lib/afterhours-media-diagnostics.js'
+import { currentAccount, sameOrigin } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
 import { validArea, validAccountId } from '../../lib/afterhours-access.js'
 import { validCollectionLabel } from '../../src/afterhours/mediaCollections.js'
@@ -28,6 +29,7 @@ export default async function handler(req, res) {
   // A browser cannot call cross-origin. The paired local uploader sends
   // Authorization and no Origin; no login cookies or storage secrets leak.
   if (!sameOrigin(req)) return res.status(403).json({ error: 'Origin check failed.' })
+  let stage='session', authorized=false
   try {
     const browserAccount = await currentAccount(req)
     const ownerBrowser = isOwner(browserAccount, process.env)
@@ -37,11 +39,13 @@ export default async function handler(req, res) {
         error: browserAccount ? 'Owner only.' : 'Login or workstation pairing required.'
       })
     }
+    authorized=true
     const body = bodyOf(req)
     if (!body || typeof body.action !== 'string') {
       return res.status(400).json({ error: 'Invalid JSON.' })
     }
 
+    stage=body.action
     // Pairing and revocation always require the existing browser Owner
     // login. Scoped bearer credentials can NEVER mint more credentials.
     if (body.action === 'pair' || body.action === 'revoke-pairings') {
@@ -129,10 +133,8 @@ export default async function handler(req, res) {
     }
     return res.status(400).json({ error: 'Unknown media action.' })
   } catch (error) {
-    if (databaseNotConfigured(error) || error?.code === 'STORAGE_NOT_CONFIGURED') {
-      return res.status(503).json({ error: 'Private media storage unavailable.' })
-    }
-    console.error('after hours private upload failed', error)
-    return res.status(503).json({ error: 'Private media operation failed.' })
+    const diagnostic=mediaDiagnostic(error,stage)
+    console.error('after hours private upload failed',diagnostic.stage,diagnostic.reason)
+    return res.status(503).json(authorized?diagnostic:{error:'Private media session service unavailable.'})
   }
 }

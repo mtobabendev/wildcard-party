@@ -23,7 +23,7 @@ async function api(body) {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || 'Media service unavailable.')
+  if (!response.ok) throw new Error('['+body.action+' · HTTP '+response.status+'] '+(data.error || 'Media service unavailable.'))
   return data
 }
 
@@ -64,7 +64,8 @@ export default function OwnerMedia() {
         const file = files[i]
         const chosenName = (fileNames[i] || '').trim()
         const name = createCollectionName(chosenName, collection)
-        setProgress((i + 1) + '/' + files.length + ': ' + chosenName)
+        setProgress((i + 1) + '/' + files.length + ': ' + chosenName + ' (' + (file.size / 1048576).toFixed(2) + ' MB)')
+        let stage='File validation'
         try {
           if (!chosenName || !/^[^\\/\\\\\x00-\x1f\x7f]+$/.test(chosenName) || chosenName.length > 180 || !/\.(jpg|jpeg|png|webp|gif|mp4|webm)$/i.test(chosenName)) {
             throw new Error('Enter a valid stored filename with its extension.')
@@ -72,27 +73,33 @@ export default function OwnerMedia() {
           if (!TYPES.has(file.type) || file.size < 1 || file.size > MAX_BYTES) {
             throw new Error('Unsupported file type or file exceeds 150 MB.')
           }
+          stage='Check catalog'
           const existing = await api({ action: 'check', area, name })
           if (existing.exists) {
             next.push({ name: name || chosenName || file.name, status: 'Skipped (already exists)' })
           } else if (file.size <= RELAY_MAX_BYTES) {
+            stage='Read and relay small file'
             const result = await api({ action: 'relay', area, name, contentType: file.type, byteSize: file.size, base64: await fileBase64(file) })
             if (result.ok !== true) throw new Error('Upload not verified.')
             next.push({ name, status: 'Uploaded' })
           } else {
+          stage='Request upload ticket'
           const { upload: ticket } = await api({
             action: 'start', area, name, contentType: file.type, byteSize: file.size,
           })
+          if(!ticket?.uploadUrl||!ticket?.id)throw new Error('Upload ticket missing.')
+          stage='Transfer to private storage'
           const sent = await fetch(ticket.uploadUrl, {
             method: 'PUT', headers: { 'Content-Type': ticket.contentType }, body: file,
           })
           if (!sent.ok) throw new Error('Storage rejected upload (' + sent.status + ').')
+          stage='Verify and register upload'
           const finished = await api({ action: 'finish', id: ticket.id })
           if (finished.ok !== true) throw new Error('Upload not verified.')
           next.push({ name: name || chosenName || file.name, status: 'Uploaded' })
           }
         } catch (error) {
-          next.push({ name: name || chosenName || file.name, status: 'Failed: ' + error.message })
+          next.push({ name: name || chosenName || file.name, status: 'Failed: ' + stage + ' — ' + error.message })
           failed.push(file)
           failedNames.push(chosenName)
         }
