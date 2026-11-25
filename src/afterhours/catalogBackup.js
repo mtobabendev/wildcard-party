@@ -3,7 +3,7 @@ import {normalizeStripagram} from './stripagramModel.js'
 export const CATALOG_AREAS=['penny','kandy','ashley']
 export const CATALOG_SURFACES=['afterhours','stripagram']
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const normalize=(surface,content)=>surface==='stripagram'?normalizeStripagram(content):normalizeContent(content)
+const normalize=(surface,content,area)=>surface==='stripagram'?normalizeStripagram(content):normalizeContent(content,area)
 function mediaList(value){
  if(!Array.isArray(value)||value.length>1000)throw Error('Invalid media inventory.')
  const ids=new Set()
@@ -21,7 +21,7 @@ export function parseCatalog(value){
   const key=page.area+'/'+page.surface
   if(seen.has(key))throw Error('Duplicate catalog page.')
   seen.add(key)
-  const content=normalize(page.surface,page.content)
+  const content=normalize(page.surface,page.content,page.area)
   if(!content)throw Error('Invalid layout for '+key)
   const media=mediaList(page.media)
   if(!contentMediaValid(content,media))throw Error('Backup has unresolved media references for '+key+'.')
@@ -52,7 +52,9 @@ export function restoreDraft(catalog,area,surface,currentMedia){
  draft.orbitCards=draft.orbitCards.map(bind)
  draft.posts=draft.posts.map(p=>({...p,mediaId:bind(p.mediaId)}))
  if(failures.size)throw Error('Resolve media before restoring: '+[...failures].join('; '))
- const checked=normalize(surface,draft)
+ draft.postOverrides=Object.fromEntries(Object.entries(draft.postOverrides??{}).map(([id,p])=>[id,p.mediaMode==='replace'?{...p,mediaId:bind(p.mediaId)}:p]))
+ if(failures.size)throw Error('Resolve media before restoring: '+[...failures].join('; '))
+ const checked=normalize(surface,draft,area)
  if(!checked||!contentMediaValid(checked,current))throw Error('Restored draft failed validation.')
  return checked
 }

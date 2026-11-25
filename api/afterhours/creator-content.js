@@ -39,7 +39,7 @@ export function createContentHandler({account=currentAccount,owner=isOwner,grant
     }
     let body=req.body
     if (typeof body==='string') {try{body=JSON.parse(body)}catch{return res.status(400).json({error:'Invalid JSON.'})}}
-    const content=(strip?normalizeStripagram:normalizeContent)(body?.content)
+    const content=strip?normalizeStripagram(body?.content):normalizeContent(body?.content,area)
     if (!content || !Number.isSafeInteger(body.revision) || body.revision<0 || !contentMediaValid(content,media)) return res.status(400).json({error:'Invalid content or unavailable media.'})
     const result=await (strip?stripSave:save)(area,body.revision,content)
     return result ? res.status(200).json(result) : res.status(409).json({error:'Content changed in another session. Reload before editing.'})
