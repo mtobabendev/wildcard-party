@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync,readdirSync} from 'node:fs'
+import {X509Certificate} from 'node:crypto'
 import {databaseTransport,postgresTag,postgresPoolOptions} from '../lib/database-sql.js'
 test('existing Neon URLs use the current HTTP driver; other PostgreSQL hosts use standard wire protocol',()=>{
  assert.equal(databaseTransport('postgresql://u:p@ep-test.us-east-1.aws.neon.tech/db'),'neon-http')
@@ -31,4 +32,13 @@ test('production database modules route through shared adapter',()=>{
   const s=readFileSync(new URL(file,dir),'utf8')
   assert.doesNotMatch(s,/from ['"]@neondatabase\/serverless['"]/,file)
  }
+})
+
+test('Supabase pooler uses the pinned public CA and verifies the server',()=>{
+ const options=postgresPoolOptions('postgresql://u:p@aws-1-us-east-2.pooler.supabase.com:6543/postgres?sslmode=disable')
+ assert.equal(options.ssl.rejectUnauthorized,true)
+ assert.equal(new URL(options.connectionString).searchParams.has('sslmode'),false)
+ const c=new X509Certificate(options.ssl.ca)
+ assert.equal(c.ca,true)
+ assert.equal(c.fingerprint256,'80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA')
 })
