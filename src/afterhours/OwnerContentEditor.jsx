@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { mergeCreatorDraft } from './ownerEditorRecovery.js'
 import { emptyContent, emptyOrbitCards } from './contentModel.js'
 import { STRIPAGRAM_POST_DEFAULTS } from './stripagramModel.js'
+import { BUILTIN_POSTS } from './builtinPosts.js'
 import { CATALOG_AREAS, CATALOG_SURFACES, createCatalog, parseCatalog, restoreDraft } from './catalogBackup.js'
 const AREAS=['penny','kandy','ashley']
 const api=(area,surface)=>'/api/afterhours/creator-content?area='+area+'&surface='+surface
@@ -51,8 +52,11 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
     return ()=>{window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh)}
   },[])
   function edit(fn){setContent(fn);setDirty(true);setMessage('Unsaved changes')}
+  function patchBuiltin(id,change){edit(c=>({...c,postOverrides:{...c.postOverrides,[id]:{...c.postOverrides?.[id],...change}}}))}
+  function resetBuiltin(id){edit(c=>{const postOverrides={...c.postOverrides};delete postOverrides[id];return {...c,postOverrides}})}
   function patch(id,change){edit(c=>({...c,posts:c.posts.map(p=>p.id===id?{...p,...change}:p)}))}
   async function save(){
+    if(!strip&&Object.values(content.postOverrides??{}).some(p=>p.mediaMode==='replace'&&!p.mediaId)){setMessage('Select a replacement attachment before saving.');return}
     setBusy(true);setMessage('Saving…')
     try{
       const submit=(revision,content)=>fetch(api(area,surface),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,content})})
@@ -128,6 +132,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
       <p role="status" style={{overflowWrap:'anywhere'}}>{catalogStatus}</p>
     </details>
     <p role="status">{message}</p>
+    {!strip&&ready&&<p><a href="#existing-posts">Edit existing page posts</a></p>}
     {ready&&<fieldset disabled={busy} style={{border:0,padding:0,minWidth:0}}>
       {strip&&<section aria-label="StripaGram identity" style={{display:'grid',gap:8,marginBottom:16}}>
         <h3>StripaGram profile details</h3>
@@ -158,6 +163,28 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
           </label>)}
         </div>
         <button type="button" style={{marginTop:12}} onClick={()=>edit(c=>({...c,orbitCards:Array(8).fill('blank')}))}>Clear all eight cards</button>
+      </section>}
+      {!strip&&<section id="existing-posts" style={{margin:'18px 0',scrollMarginTop:16}}>
+        <h3>Existing page posts</h3>
+        <p>Edit the original posts without re-uploading their original artwork. Text changes preserve original media and controls. Hide or restore any original post.</p>
+        {(BUILTIN_POSTS[area]??[]).map(p=>{
+          const override=content.postOverrides?.[p.id]??{}
+          const mode=override.mediaMode??'original'
+          return <details key={p.id} style={{margin:'12px 0',padding:12,border:'1px solid #785879',borderRadius:8}}>
+            <summary>{override.hidden?'Hidden: ':''}{override.title??p.title}</summary>
+            <div style={{display:'grid',gap:8,marginTop:12}}>
+              <label>Title <input style={{width:'100%',boxSizing:'border-box'}} maxLength={120} value={override.title??p.title} onChange={e=>patchBuiltin(p.id,{title:e.target.value})}/></label>
+              <label>Text <textarea style={{width:'100%',boxSizing:'border-box'}} rows={5} maxLength={3000} value={override.body??p.body} onChange={e=>patchBuiltin(p.id,{body:e.target.value})}/></label>
+              <label>Attachment <select style={{width:'100%'}} value={mode} onChange={e=>patchBuiltin(p.id,{mediaMode:e.target.value,mediaId:null})}><option value="original">Keep original media and controls</option><option value="replace" disabled={!media.length}>Replace with uploaded media</option><option value="none">Text only</option></select></label>
+              {mode==='replace'&&<label>Replacement media {pick(override.mediaId,id=>patchBuiltin(p.id,{mediaId:id}))}</label>}
+              <label>Optional internal link <input style={{width:'100%',boxSizing:'border-box'}} maxLength={300} value={override.link??''} placeholder="/creators" onChange={e=>patchBuiltin(p.id,{link:e.target.value})}/></label>
+              <label><input type="checkbox" checked={Boolean(override.hidden)} onChange={e=>patchBuiltin(p.id,{hidden:e.target.checked})}/> Hide this original post</label>
+              <button type="button" onClick={()=>resetBuiltin(p.id)}>Restore original post</button>
+            </div>
+          </details>
+        })}
+        <button type="button" disabled={!dirty} onClick={save}>Save changes</button>
+        <p role="status" aria-live="polite">{message}</p>
       </section>}
       <h3>Posts (newest first)</h3>
       <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:'',...(strip?STRIPAGRAM_POST_DEFAULTS:{})},...c.posts]}))}>+ New post</button>

@@ -19,7 +19,7 @@ export function emptyStripagram(area){
 }
 export function normalizeStripagram(value){
  const base=normalizeContent(value)
- if(!base||!value.profile||typeof value.profile!=='object')return null
+ if(!base||Object.keys(base.postOverrides).length||!value.profile||typeof value.profile!=='object')return null
  const p=value.profile
  const text=(v,n)=>typeof v==='string'&&v.length<=n
  if(!text(p.name,120)||!p.name.trim()||!text(p.handle,40)||!/^([a-zA-Z0-9_.-]+)$/.test(p.handle)||!text(p.mark,12)||!p.mark.trim()||!text(p.bio,2000)||!text(p.role,100))return null
