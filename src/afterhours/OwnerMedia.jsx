@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import OwnerContentEditor from './OwnerContentEditor.jsx'
+import { browserMediaType } from './ownerEditorRecovery.js'
 import { createCollectionName } from './mediaCollections.js'
 
 const AREAS = ['penny', 'kandy', 'ashley']
@@ -62,6 +63,7 @@ export default function OwnerMedia() {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
+        const contentType = browserMediaType(file.type, file.name)
         const chosenName = (fileNames[i] || '').trim()
         const name = createCollectionName(chosenName, collection)
         setProgress((i + 1) + '/' + files.length + ': ' + chosenName)
@@ -69,19 +71,19 @@ export default function OwnerMedia() {
           if (!chosenName || !/^[^\\/\\\\\x00-\x1f\x7f]+$/.test(chosenName) || chosenName.length > 180 || !/\.(jpg|jpeg|png|webp|gif|mp4|webm)$/i.test(chosenName)) {
             throw new Error('Enter a valid stored filename with its extension.')
           }
-          if (!TYPES.has(file.type) || file.size < 1 || file.size > MAX_BYTES) {
+          if (!TYPES.has(contentType) || file.size < 1 || file.size > MAX_BYTES) {
             throw new Error('Unsupported file type or file exceeds 150 MB.')
           }
           const existing = await api({ action: 'check', area, name })
           if (existing.exists) {
             next.push({ name: name || chosenName || file.name, status: 'Skipped (already exists)' })
           } else if (file.size <= RELAY_MAX_BYTES) {
-            const result = await api({ action: 'relay', area, name, contentType: file.type, byteSize: file.size, base64: await fileBase64(file) })
+            const result = await api({ action: 'relay', area, name, contentType, byteSize: file.size, base64: await fileBase64(file) })
             if (result.ok !== true) throw new Error('Upload not verified.')
             next.push({ name, status: 'Uploaded' })
           } else {
           const { upload: ticket } = await api({
-            action: 'start', area, name, contentType: file.type, byteSize: file.size,
+            action: 'start', area, name, contentType, byteSize: file.size,
           })
           const sent = await fetch(ticket.uploadUrl, {
             method: 'PUT', headers: { 'Content-Type': ticket.contentType }, body: file,
@@ -154,7 +156,7 @@ export default function OwnerMedia() {
     finally { setBusy(false); setMediaRevision(value => value + 1) }
   }
 
-  return <><OwnerContentEditor mediaRevision={mediaRevision} /><section style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
+  return <><section id="private-media-upload" style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
     <p>Upload multiple private photos and videos directly from your phone or computer. Choose the area and collection once. Existing files are skipped; failed files remain selected for retry.</p>
     <form onSubmit={upload} style={{ display: 'grid', gap: 12 }}>
@@ -165,7 +167,7 @@ export default function OwnerMedia() {
       </label>
       <label>Files (select multiple){' '}
         <input aria-label="Choose private media" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm" multiple disabled={busy}
-          onChange={e => { const selected = Array.from(e.target.files || []); setFiles(selected); setFileNames(selected.map(file => file.name)); setResults([]); setMessage('') }} />
+          onChange={e => { const selected = Array.from(e.target.files || []); e.target.value = ''; setFiles(selected); setFileNames(selected.map(file => file.name)); setResults([]); setMessage('') }} />
       </label>
       <p role="status">{files.length} file(s) ready{busy ? ' — uploading...' : ''}</p>
       {files.length > 0 && <div style={{ display: 'grid', gap: 8 }}>
@@ -204,5 +206,5 @@ export default function OwnerMedia() {
       <p>Owner only. Verifies the private bucket, then imports missing approved media. Existing public URLs are unchanged.</p>
       <button type="button" disabled={busy} onClick={importExistingPennyMedia}>Verify bucket and import 39 Penny files</button>
     </details>
-  </section></>
+  </section><OwnerContentEditor mediaRevision={mediaRevision} /></>
 }

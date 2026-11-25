@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { mergeCreatorDraft } from './ownerEditorRecovery.js'
 import { emptyContent, emptyOrbitCards } from './contentModel.js'
 import { STRIPAGRAM_POST_DEFAULTS } from './stripagramModel.js'
 import { CATALOG_AREAS, CATALOG_SURFACES, createCatalog, parseCatalog, restoreDraft } from './catalogBackup.js'
@@ -11,6 +12,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   const [content,setContent]=useState(emptyContent)
   const [media,setMedia]=useState([])
   const [revision,setRevision]=useState(0)
+  const [base,setBase]=useState(null)
   const [ready,setReady]=useState(false)
   const [busy,setBusy]=useState(false)
   const [dirty,setDirty]=useState(false)
@@ -27,7 +29,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
     setReady(false);setDirty(false);setMedia([]);setMediaStatus('');setMessage('Loading creator content…')
     fetch(api(area,surface),{credentials:'same-origin',cache:'no-store'}).then(async r=>{
       const d=await r.json();if(!r.ok)throw Error(d.error||'Load failed')
-      if(active){setContent({...emptyContent(),...d.content});setMedia(d.media);setRevision(d.revision);setReady(true);setMessage('')}
+      if(active){const loaded={...emptyContent(),...d.content};setContent(loaded);setBase(loaded);setMedia(d.media);setRevision(d.revision);setReady(true);setMessage('')}
     }).catch(e=>{if(active)setMessage(e.message)})
     return ()=>{active=false}
   },[area,surface,reload])
@@ -53,9 +55,19 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   async function save(){
     setBusy(true);setMessage('Saving…')
     try{
-      const r=await fetch(api(area,surface),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,content})})
+      const submit=(revision,content)=>fetch(api(area,surface),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,content})})
+      let r=await submit(revision,content)
+      if(r.status===409 && base) {
+        const fresh=await fetch(api(area,surface),{credentials:'same-origin',cache:'no-store'})
+        const latest=await fresh.json()
+        if(!fresh.ok)throw Error(latest.error||'Could not refresh saved content. Your edits are retained.')
+        const merged=mergeCreatorDraft(base,content,{...emptyContent(),...latest.content})
+        if(merged.conflicts.length)throw Error('Another session changed '+merged.conflicts.join(', ')+'. Your edits are retained; review the latest saved layout in a separate tab before reloading.')
+        r=await submit(latest.revision,merged.content)
+        if(r.status===409)throw Error('Content changed again during save. Your edits are retained; retry Save changes.')
+      }
       const d=await r.json();if(!r.ok)throw Error(d.error||'Save failed')
-      setContent(d.content);setRevision(d.revision);setDirty(false);setMessage('Saved. Refresh the creator page to see changes.')
+      setContent(d.content);setBase(d.content);setRevision(d.revision);setDirty(false);setMessage('Saved. Refresh the creator page to see changes.')
     }catch(e){setMessage(e.message)}finally{setBusy(false)}
   }
   async function exportCatalog(){
