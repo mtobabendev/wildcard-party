@@ -73,6 +73,7 @@ export default function OwnerMedia() {
             throw new Error('Unsupported file type or file exceeds 150 MB.')
           }
           const existing = await api({ action: 'check', area, name })
+          if (Number.isSafeInteger(existing.maxBytes) && file.size > existing.maxBytes) throw new Error('File exceeds the current storage limit of ' + Math.floor(existing.maxBytes / 1000000) + ' MB.')
           if (existing.exists) {
             next.push({ name: name || chosenName || file.name, status: 'Skipped (already exists)' })
           } else if (file.size <= RELAY_MAX_BYTES) {

@@ -1,3 +1,4 @@
+import { storageFileLimit } from '../../lib/object-storage-config.js'
 import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
 import { validArea, validAccountId } from '../../lib/afterhours-access.js'
@@ -93,7 +94,7 @@ export default async function handler(req, res) {
       }
       const existing = body.name ? await privateMediaByName(area, body.name) : null
       return res.status(200).json({
-        ok: true, area, exists: Boolean(existing), type: existing?.content_type || null
+        ok: true, area, exists: Boolean(existing), type: existing?.content_type || null, maxBytes: storageFileLimit()
       })
     }
     if (body.action === 'relay') {
@@ -109,6 +110,7 @@ export default async function handler(req, res) {
       return done ? res.status(200).json({ ok: true }) : res.status(409).json({ error: 'Upload not verified.' })
     }
     if (body.action === 'start') {
+      if (Number.isSafeInteger(body.byteSize) && body.byteSize > storageFileLimit()) return res.status(413).json({error:'File exceeds current storage limit of '+Math.floor(storageFileLimit()/1000000)+' MB.'})
       const area = validArea(body.area)
       const contentType = validMediaType(body.contentType)
       if (!area || !contentType || !validMediaSize(body.byteSize) ||
