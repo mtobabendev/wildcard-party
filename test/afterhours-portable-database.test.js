@@ -42,3 +42,8 @@ test('Supabase pooler uses the pinned public CA and verifies the server',()=>{
  assert.equal(c.ca,true)
  assert.equal(c.fingerprint256,'80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA')
 })
+
+test('recovery uses a separate explicit database destination and fails closed on missing recovery owner',async()=>{
+ const {partyDatabaseUrl}=await import('../lib/database-sql.js'); const {isOwner}=await import('../lib/penny-owner.js'); const id='11111111-1111-4111-8111-111111111111'; const other='22222222-2222-4222-8222-222222222222';
+ assert.equal(partyDatabaseUrl({DATABASE_URL:'old',PARTY_DATABASE_URL:'new'}),'new'); assert.equal(partyDatabaseUrl({DATABASE_URL:'old'}),'old'); assert.equal(isOwner({id},{PARTY_DATABASE_URL:'new',PENNYCORE_OWNER_ACCOUNT_ID:id}),false); assert.equal(isOwner({id},{PARTY_DATABASE_URL:'new',PARTY_RECOVERY_OWNER_ACCOUNT_ID:id,PENNYCORE_OWNER_ACCOUNT_ID:other}),true); assert.equal(isOwner({id:other},{PARTY_DATABASE_URL:'new',PARTY_RECOVERY_OWNER_ACCOUNT_ID:id,PENNYCORE_OWNER_ACCOUNT_ID:other}),false);
+})
