@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
+import {Script} from 'node:vm'
 import {emptyStripagram,normalizeStripagram} from '../src/afterhours/stripagramModel.js'
 import {createContentHandler} from '../api/afterhours/creator-content.js'
 test('three separate creator defaults and existing demo fields are editable',()=>{
@@ -20,8 +21,20 @@ test('stripagram reads and writes are isolated and still require creator grants'
 })
 test('profile page consumes scoped configuration without inserting HTML',()=>{
  const html=readFileSync(new URL('../public/stripagram/index.html',import.meta.url),'utf8')
+ const inline=html.match(/<script>([\s\S]*?)<\/script>/)[1]
+ assert.doesNotThrow(()=>new Script(inline))
  assert.match(html,/surface=stripagram&area=/)
  assert.match(html,/Object.hasOwn\(people,requestedProfile\)/)
  assert.match(html,/managed\.get\(person\)/)
  assert.doesNotMatch(html,/\.innerHTML\s*=/)
+})
+
+test('stripagram owner writes use only the separate revisioned store',async()=>{
+ let written
+ const handler=createContentHandler({account:async()=>({id:'owner'}),owner:()=>true,list:async()=>[],save:async()=>{throw Error('wrong store')},stripSave:async(area,revision,content)=>{written={area,revision,content};return {revision:revision+1,content}}})
+ const content=emptyStripagram('ashley')
+ content.profile.bio='Updated creator biography'
+ const req={method:'POST',headers:{host:'party.wildcarddev.com',origin:'https://party.wildcarddev.com'},query:{area:'ashley',surface:'stripagram'},body:{revision:0,content}}
+ const res={setHeader(){},status(n){this.code=n;return this},json(d){this.data=d;return this}}
+ await handler(req,res);assert.equal(res.code,200);assert.equal(written.area,'ashley');assert.equal(written.content.profile.bio,content.profile.bio);assert.equal(res.data.revision,1)
 })
