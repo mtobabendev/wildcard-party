@@ -2,6 +2,7 @@ import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/aut
 import { isOwner } from '../../lib/penny-owner.js'
 import { validArea, validAccountId } from '../../lib/afterhours-access.js'
 import { validCollectionLabel } from '../../src/afterhours/mediaCollections.js'
+import { uploadLimit } from '../../lib/media-storage-routing.js'
 import { decodeRelayBytes } from '../../lib/afterhours-upload-bytes.js'
 import { finishPrivateUpload, startPrivateUpload, privateMediaByName, validMediaSize, validMediaType } from '../../lib/afterhours-media.js'
 import { issueUploadToken, ownerFromUploadToken, revokeOwnerUploadTokens } from '../../lib/afterhours-agent-token.js'
@@ -113,7 +114,7 @@ export default async function handler(req, res) {
       const contentType = validMediaType(body.contentType)
       if (!area || !contentType || !validMediaSize(body.byteSize) ||
           !validName(body.name)) {
-        return res.status(400).json({ error: 'Invalid media metadata.' })
+        return res.status(400).json({ error: 'Invalid media metadata or file exceeds the configured '+Math.floor(uploadLimit()/1000000)+' MB limit.' })
       }
       const upload = await startPrivateUpload({
         ownerId: account.id, area, name: body.name,
