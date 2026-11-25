@@ -1,3 +1,4 @@
+import { POLL } from './comms/poll-policy.js'
 import PennyThoughtBubble from './components/PennyThoughtBubble.jsx'
 import PennyPixelAvatar from './components/PennyPixelAvatar.jsx'
 import PennyActiveAvatar from './components/PennyActiveAvatar.jsx'
@@ -354,9 +355,9 @@ function App() {
     }
 
     const startUnreadPolling = () => {
-      if (document.hidden) return
+      if (document.hidden || unreadTimer !== null) return
       refreshUnread()
-      unreadTimer = window.setInterval(refreshUnread, 12000)
+      unreadTimer = window.setInterval(refreshUnread, POLL.unread)
     }
 
     const restartUnreadPolling = () => {
@@ -428,9 +429,9 @@ function App() {
     }
 
     const startPresenceHeartbeat = () => {
-      if (document.hidden) return
+      if (document.hidden || presenceTimer !== null) return
       sendPresenceHeartbeat()
-      presenceTimer = window.setInterval(sendPresenceHeartbeat, 30000)
+      presenceTimer = window.setInterval(sendPresenceHeartbeat, POLL.presence)
     }
 
     const restartPresenceHeartbeat = () => {

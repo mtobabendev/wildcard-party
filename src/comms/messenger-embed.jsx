@@ -1,3 +1,4 @@
+import { POLL, nextUnreadDelay, bridgeStateChanged } from './poll-policy.js'
 import { BRIDGE, parentOrigin, validParentEvent, unreadCount } from './messenger-bridge.js'
 
 const origin = parentOrigin(new URLSearchParams(location.search).get('parent'))
@@ -16,7 +17,7 @@ if (!origin || window.parent === window) {
   let mount = null
   let generation = 0
   let stopped = false
-  let delay = 12000
+  let delay = POLL.unread
   const stopPoll = () => {
     if (timer !== null) clearTimeout(timer)
     timer = null
@@ -35,11 +36,12 @@ if (!origin || window.parent === window) {
         credentials: 'same-origin', cache: 'no-store', signal: request.signal,
       })
       if (request.signal.aborted) return
-      if (response.status === 401) { delay = 60000; status(0, false); return }
+      delay = nextUnreadDelay(delay, response.status)
+      if (response.status === 401) { status(0, false); return }
       if (!response.ok) return
       const count = unreadCount((await response.json()).unreadCount)
-      if (!request.signal.aborted && count !== null) { delay = 12000; status(count, true) }
-    } catch { /* network errors retain last verified state */ }
+      if (!request.signal.aborted && count !== null) { status(count, true) }
+    } catch { if (!request.signal.aborted) delay = nextUnreadDelay(delay, 0) }
     finally {
       if (controller === request) {
         controller = null
@@ -76,8 +78,10 @@ if (!origin || window.parent === window) {
   }
   window.addEventListener('message', event => {
     if (!validParentEvent(event, origin, window.parent) || stopped) return
-    const changed = state.open !== event.data.open
-    state = { open: event.data.open, visible: event.data.visible }
+    const next = { open: event.data.open, visible: event.data.visible }
+    if (!bridgeStateChanged(state, next)) return
+    const changed = state.open !== next.open
+    state = next
     if (changed) syncView()
     else if (!state.open) syncPoll()
   })

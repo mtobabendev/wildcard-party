@@ -1,3 +1,4 @@
+import { POLL } from './poll-policy.js'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import './comms.css'
 import TwilioCall from './TwilioCall.jsx'
@@ -483,9 +484,9 @@ export default function CommsPanel({
       pollConversationList()
       if (refreshMessages) pollActiveConversation()
 
-      conversationTimer = window.setInterval(pollConversationList, 12000)
+      conversationTimer = window.setInterval(pollConversationList, POLL.conversations)
       if (selectedConversation?.id) {
-        messageTimer = window.setInterval(pollActiveConversation, 4000)
+        messageTimer = window.setInterval(pollActiveConversation, POLL.activeConversation)
       }
     }
 
