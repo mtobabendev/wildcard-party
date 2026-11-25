@@ -65,20 +65,22 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
     <p><a href={'/afterhours-members.html?area='+area} target="_blank" rel="noopener noreferrer">Manage collections (move or remove)</a>{' · '}<a href={'https://www.wildcarddev.com/'+area+'/after-hours'} target="_blank" rel="noopener noreferrer">Open creator page</a></p>
     <p role="status">{message}</p>
     {ready&&<fieldset disabled={busy} style={{border:0,padding:0,minWidth:0}}>
-      <h3>Profile banner</h3><label>Choose an existing image {pick(content.bannerId,id=>edit(c=>({...c,bannerId:id})),'image')}</label>
-      {area==='penny'&&<section id="profile-video" aria-labelledby="profile-video-title" style={{scrollMarginTop:16,margin:'18px 0'}}>
+      <h3>Profile banner</h3><label>Choose an existing image {pick(content.bannerId,id=>edit(c=>({...c,bannerId:id,coverVideoId:id?null:c.coverVideoId})),'image')}</label>
+      <label>Animated cover / wallpaper {pick(content.coverVideoId,id=>edit(c=>({...c,coverVideoId:id,bannerId:id?null:c.bannerId})),'video')}</label>
+      <h3>Circular profile avatar</h3><label>Image or video {pick(content.avatarId,id=>edit(c=>({...c,avatarId:id})))}</label>
+      <section id="profile-video" aria-labelledby="profile-video-title" style={{scrollMarginTop:16,margin:'18px 0'}}>
         <h3 id="profile-video-title">Profile video</h3>
         <p>Optional video beneath the Profile heading. Choose None / default to hide the player.</p>
         <label>Video {pick(content.profileVideoId,id=>edit(c=>({...c,profileVideoId:id})),'video')}</label>
-      </section>}
-      {area==='penny'&&<section id="orbit-cards" aria-labelledby="orbit-cards-title" style={{margin:'18px 0',scrollMarginTop:16}}>
+      </section>
+      <section id="orbit-cards" aria-labelledby="orbit-cards-title" style={{margin:'18px 0',scrollMarginTop:16}}>
         <h3 id="orbit-cards-title">Spinner cards and matching tiles (01–08)</h3>
         <p>Each selection updates the card, its matching tile, and the card viewer together. The separate Photos gallery is unchanged.</p>
         <div style={{display:'grid',gap:12}}>
           {(content.orbitCards ?? emptyOrbitCards()).map((id,index)=><label key={index} style={{display:'grid',gap:4}}>
             Card / Photo {String(index+1).padStart(2,'0')}
             <select value={id??''} onChange={e=>edit(c=>({...c,orbitCards:(c.orbitCards??emptyOrbitCards()).map((v,i)=>i===index?(e.target.value||null):v)}))} style={{width:'100%',maxWidth:'100%'}}>
-              <option value="">Keep original</option>
+              <option value="">{area==='penny'?'Keep original':'Default blank card'}</option>
               <option value="blank">Blank card</option>
               {media.filter(m=>m.type.startsWith('image/')).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
               {id&&id!=='blank'&&!media.some(m=>m.id===id)&&<option value={id}>Unavailable — choose another</option>}
@@ -86,7 +88,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
           </label>)}
         </div>
         <button type="button" style={{marginTop:12}} onClick={()=>edit(c=>({...c,orbitCards:Array(8).fill('blank')}))}>Clear all eight cards</button>
-      </section>}
+      </section>
       <h3>Posts (newest first)</h3>
       <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:''},...c.posts]}))}>+ New post</button>
       {content.posts.map(p=><div key={p.id} style={{display:'grid',gap:8,margin:'12px 0',padding:12,border:'1px solid #785879',borderRadius:8}}>

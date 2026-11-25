@@ -56,3 +56,14 @@ test('eight orbit slots support legacy defaults, blank cards and catalog images'
  assert.equal(contentMediaValid(content,[{id,type:'image/png'}]),true)
  assert.equal(contentMediaValid(normalizeContent({...legacy,orbitCards:Array(8).fill('blank')}),[]),true)
 })
+
+test('creator media settings are optional, backward compatible and type checked',()=>{
+ const legacy={bannerId:null,posts:[]}
+ const content=normalizeContent({...legacy,coverVideoId:id,avatarId:id})
+ assert.equal(content.coverVideoId,id)
+ assert.equal(content.avatarId,id)
+ assert.equal(contentMediaValid(content,[{id,type:'video/mp4'}]),true)
+ assert.equal(contentMediaValid(content,[{id,type:'image/png'}]),false)
+ assert.equal(contentMediaValid(normalizeContent({...legacy,avatarId:id}),[{id,type:'image/webp'}]),true)
+ assert.equal(normalizeContent({...legacy,avatarId:'bad'}),null)
+})
