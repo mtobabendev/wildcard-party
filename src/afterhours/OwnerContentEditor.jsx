@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { emptyContent, emptyOrbitCards } from './contentModel.js'
+import { STRIPAGRAM_POST_DEFAULTS } from './stripagramModel.js'
 const AREAS=['penny','kandy','ashley']
-const api=(area)=>'/api/afterhours/creator-content?area='+area
+const api=(area,surface)=>'/api/afterhours/creator-content?area='+area+'&surface='+surface
 export default function OwnerContentEditor({ mediaRevision = 0 }) {
   const [area,setArea]=useState('penny')
+  const [surface,setSurface]=useState('afterhours')
+  const strip=surface==='stripagram'
   const [content,setContent]=useState(emptyContent)
   const [media,setMedia]=useState([])
   const [revision,setRevision]=useState(0)
@@ -18,12 +21,12 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   useEffect(()=>{
     let active=true
     setReady(false);setDirty(false);setMedia([]);setMediaStatus('');setMessage('Loading creator content…')
-    fetch(api(area),{credentials:'same-origin',cache:'no-store'}).then(async r=>{
+    fetch(api(area,surface),{credentials:'same-origin',cache:'no-store'}).then(async r=>{
       const d=await r.json();if(!r.ok)throw Error(d.error||'Load failed')
       if(active){setContent({...emptyContent(),...d.content});setMedia(d.media);setRevision(d.revision);setReady(true);setMessage('')}
     }).catch(e=>{if(active)setMessage(e.message)})
     return ()=>{active=false}
-  },[area,reload])
+  },[area,surface,reload])
   // Refresh only the catalog; never replace an unsaved content draft or revision.
   useEffect(()=>{
     if(!ready)return
@@ -46,7 +49,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   async function save(){
     setBusy(true);setMessage('Saving…')
     try{
-      const r=await fetch(api(area),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,content})})
+      const r=await fetch(api(area,surface),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,content})})
       const d=await r.json();if(!r.ok)throw Error(d.error||'Save failed')
       setContent(d.content);setRevision(d.revision);setDirty(false);setMessage('Saved. Refresh the creator page to see changes.')
     }catch(e){setMessage(e.message)}finally{setBusy(false)}
@@ -58,13 +61,20 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   </select>
   return <section style={{maxWidth:920,margin:'16px auto',padding:16,border:'1px solid #99688f',borderRadius:16,background:'#22152c',color:'#fff'}}>
     <h2>Creator content manager</h2><p>Manage page content for each creator. Existing member permissions remain in force.</p>
+    <label>Site <select value={surface} disabled={busy} onChange={e=>{if(!dirty||window.confirm('Discard unsaved edits?'))setSurface(e.target.value)}}><option value="afterhours">After Hours</option><option value="stripagram">StripaGram</option></select></label>{' '}
     <label>Creator <select value={area} onChange={switchArea} disabled={busy}>{AREAS.map(a=><option key={a}>{a}</option>)}</select></label>{' '}
     <button type="button" disabled={busy||!ready} onClick={refreshMedia}>Refresh media</button>{' '}
     <button type="button" disabled={busy} onClick={()=>{if(!dirty||window.confirm('Discard unsaved edits?'))setReload(v=>v+1)}}>Reload content</button>
     <p role="status" aria-live="polite">{mediaStatus}</p>
-    <p><a href={'/afterhours-members.html?area='+area} target="_blank" rel="noopener noreferrer">Manage collections (move or remove)</a>{' · '}<a href={'https://www.wildcarddev.com/'+area+'/after-hours'} target="_blank" rel="noopener noreferrer">Open creator page</a></p>
+    <p><a href={'/afterhours-members.html?area='+area} target="_blank" rel="noopener noreferrer">Manage collections (move or remove)</a>{' · '}<a href={strip?'/stripagram/?profile='+area:'https://www.wildcarddev.com/'+area+'/after-hours'} target="_blank" rel="noopener noreferrer">Open creator page</a></p>
     <p role="status">{message}</p>
     {ready&&<fieldset disabled={busy} style={{border:0,padding:0,minWidth:0}}>
+      {strip&&<section aria-label="StripaGram identity" style={{display:'grid',gap:8,marginBottom:16}}>
+        <h3>StripaGram profile details</h3>
+        <p>Changes apply to the authorized member view. Public demo artwork and private media permissions are unchanged.</p>
+        {[['name','Display name',120],['handle','Handle (without @)',40],['mark','Profile symbol',12],['role','Role',100]].map(([field,label,max])=><label key={field}>{label} <input style={{width:'100%',boxSizing:'border-box'}} maxLength={max} value={content.profile?.[field]??''} onChange={e=>edit(c=>({...c,profile:{...c.profile,[field]:e.target.value}}))}/></label>)}
+        <label>Bio <textarea style={{width:'100%',boxSizing:'border-box'}} rows={4} maxLength={2000} value={content.profile?.bio??''} onChange={e=>edit(c=>({...c,profile:{...c.profile,bio:e.target.value}}))}/></label>
+      </section>}
       <h3>Profile banner</h3><label>Choose an existing image {pick(content.bannerId,id=>edit(c=>({...c,bannerId:id,coverVideoId:id?null:c.coverVideoId})),'image')}</label>
       <label>Animated cover / wallpaper {pick(content.coverVideoId,id=>edit(c=>({...c,coverVideoId:id,bannerId:id?null:c.bannerId})),'video')}</label>
       <h3>Circular profile avatar</h3><label>Image or video {pick(content.avatarId,id=>edit(c=>({...c,avatarId:id})))}</label>
@@ -73,7 +83,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
         <p>Optional video beneath the Profile heading. Choose None / default to hide the player.</p>
         <label>Video {pick(content.profileVideoId,id=>edit(c=>({...c,profileVideoId:id})),'video')}</label>
       </section>
-      <section id="orbit-cards" aria-labelledby="orbit-cards-title" style={{margin:'18px 0',scrollMarginTop:16}}>
+      {!strip&&<section id="orbit-cards" aria-labelledby="orbit-cards-title" style={{margin:'18px 0',scrollMarginTop:16}}>
         <h3 id="orbit-cards-title">Spinner cards and matching tiles (01–08)</h3>
         <p>Each selection updates the card, its matching tile, and the card viewer together. The separate Photos gallery is unchanged.</p>
         <div style={{display:'grid',gap:12}}>
@@ -88,12 +98,18 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
           </label>)}
         </div>
         <button type="button" style={{marginTop:12}} onClick={()=>edit(c=>({...c,orbitCards:Array(8).fill('blank')}))}>Clear all eight cards</button>
-      </section>
+      </section>}
       <h3>Posts (newest first)</h3>
-      <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:''},...c.posts]}))}>+ New post</button>
+      <button type="button" disabled={content.posts.length>=30} onClick={()=>edit(c=>({...c,posts:[{id:crypto.randomUUID(),title:'New post',body:'',mediaId:null,link:'',...(strip?STRIPAGRAM_POST_DEFAULTS:{})},...c.posts]}))}>+ New post</button>
       {content.posts.map(p=><div key={p.id} style={{display:'grid',gap:8,margin:'12px 0',padding:12,border:'1px solid #785879',borderRadius:8}}>
         <label>Title <input style={{width:'100%',boxSizing:'border-box'}} maxLength={120} value={p.title} onChange={e=>patch(p.id,{title:e.target.value})}/></label>
         <label>Text <textarea style={{width:'100%',boxSizing:'border-box'}} rows={4} maxLength={3000} value={p.body} onChange={e=>patch(p.id,{body:e.target.value})}/></label>
+        {strip&&<div style={{display:'grid',gap:8}}>
+          {[['place','Location',100],['subtitle','Subtitle',160],['mark','Poster symbol',12]].map(([field,label,max])=><label key={field}>{label} <input style={{width:'100%',boxSizing:'border-box'}} maxLength={max} value={p[field]??''} onChange={e=>patch(p.id,{[field]:e.target.value})}/></label>)}
+          <label>Category <select value={p.type} onChange={e=>patch(p.id,{type:e.target.value})}><option value="stage">Stage</option><option value="vip">VIP</option><option value="backstage">Backstage</option></select></label>
+          <label>Poster color <input type="color" value={p.spot} onChange={e=>patch(p.id,{spot:e.target.value})}/></label>
+          <label>Demo applause count <input type="number" min={0} max={1000000} value={p.likes} onChange={e=>patch(p.id,{likes:Number(e.target.value)})}/></label>
+        </div>}
         <label>Attachment {pick(p.mediaId,id=>patch(p.id,{mediaId:id}))}</label>
         <label>Internal page link (optional) <input style={{width:'100%',boxSizing:'border-box'}} maxLength={300} placeholder="/creators" value={p.link} onChange={e=>patch(p.id,{link:e.target.value})}/></label>
         <button type="button" onClick={()=>{if(window.confirm('Remove this post? Media will remain in storage.'))edit(c=>({...c,posts:c.posts.filter(x=>x.id!==p.id)}))}}>Remove post</button>
