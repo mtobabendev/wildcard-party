@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { emptyContent, emptyOrbitCards } from './contentModel.js'
 import { STRIPAGRAM_POST_DEFAULTS } from './stripagramModel.js'
+import { CATALOG_AREAS, CATALOG_SURFACES, createCatalog, parseCatalog, restoreDraft } from './catalogBackup.js'
 const AREAS=['penny','kandy','ashley']
 const api=(area,surface)=>'/api/afterhours/creator-content?area='+area+'&surface='+surface
 export default function OwnerContentEditor({ mediaRevision = 0 }) {
@@ -17,6 +18,9 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
   const [reload,setReload]=useState(0)
   const [mediaRefresh,setMediaRefresh]=useState(0)
   const [mediaStatus,setMediaStatus]=useState('')
+  const [catalog,setCatalog]=useState(null)
+  const [catalogStatus,setCatalogStatus]=useState('')
+  const [catalogBusy,setCatalogBusy]=useState(false)
   const refreshMedia=()=>setMediaRefresh(v=>v+1)
   useEffect(()=>{
     let active=true
@@ -54,6 +58,42 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
       setContent(d.content);setRevision(d.revision);setDirty(false);setMessage('Saved. Refresh the creator page to see changes.')
     }catch(e){setMessage(e.message)}finally{setBusy(false)}
   }
+  async function exportCatalog(){
+    setCatalogBusy(true);setCatalogStatus('Reading saved layouts…')
+    try{
+      const pages=await Promise.all(CATALOG_AREAS.flatMap(a=>CATALOG_SURFACES.map(async s=>{
+        const r=await fetch(api(a,s),{credentials:'same-origin',cache:'no-store'})
+        const d=await r.json()
+        if(!r.ok)throw Error(d.error||'Could not read '+a+'/'+s)
+        return {area:a,surface:s,content:d.content,media:d.media}
+      })))
+      const backup=createCatalog(pages)
+      const url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}))
+      try{const link=document.createElement('a');link.href=url;link.download='wildcard-catalog-'+new Date().toISOString().slice(0,10)+'.json';document.body.append(link);link.click();link.remove()}
+      finally{setTimeout(()=>URL.revokeObjectURL(url),1000)}
+      setCatalogStatus('Six saved layouts exported. Store this file privately with your original media.')
+    }catch(e){setCatalogStatus('Export failed: '+e.message)}finally{setCatalogBusy(false)}
+  }
+  async function readCatalog(event){
+    const file=event.target.files?.[0]
+    event.target.value=''
+    if(!file)return
+    setCatalog(null);setCatalogBusy(true)
+    try{
+      if(file.size>2*1024*1024)throw Error('Catalog exceeds 2 MB.')
+      setCatalog(parseCatalog(JSON.parse(await file.text())))
+      setCatalogStatus('Six layouts loaded locally. Choose a page, then load it as an unsaved draft.')
+    }catch(e){setCatalogStatus('Import failed: '+e.message)}finally{setCatalogBusy(false)}
+  }
+  function loadCatalogDraft(){
+    if(!ready||!catalog||busy||catalogBusy)return
+    if(dirty&&!window.confirm('Replace your unsaved draft with the backup?'))return
+    try{
+      const draft=restoreDraft(catalog,area,surface,media)
+      edit(()=>draft)
+      setCatalogStatus('Draft restored. Review it before saving. No server changes yet.')
+    }catch(e){setCatalogStatus(e.message)}
+  }
   const switchArea=e=>{if(!dirty||window.confirm('Discard unsaved edits?'))setArea(e.target.value)}
   const pick=(value,onChange,kind='all')=><select value={value||''} onChange={e=>onChange(e.target.value||null)} disabled={busy} style={{maxWidth:'100%',width:'100%'}}>
     <option value="">None / default</option>{media.filter(m=>kind==='all'||(kind==='image'&&m.type.startsWith('image/'))||(kind==='video'&&['video/mp4','video/webm'].includes(m.type))).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
@@ -67,6 +107,14 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
     <button type="button" disabled={busy} onClick={()=>{if(!dirty||window.confirm('Discard unsaved edits?'))setReload(v=>v+1)}}>Reload content</button>
     <p role="status" aria-live="polite">{mediaStatus}</p>
     <p><a href={'/afterhours-members.html?area='+area} target="_blank" rel="noopener noreferrer">Manage collections (move or remove)</a>{' · '}<a href={strip?'/stripagram/?profile='+area:'https://www.wildcarddev.com/'+area+'/after-hours'} target="_blank" rel="noopener noreferrer">Open creator page</a></p>
+    <details style={{margin:'12px 0'}}>
+      <summary>Portable catalog backup / restore</summary>
+      <p>Export all six saved layouts and filename references to a local JSON file. Media bytes and account credentials are not included. This is not an atomic database snapshot. Import never saves automatically.</p>
+      <button type="button" disabled={catalogBusy||busy||!ready} onClick={exportCatalog}>Export six saved layouts</button>{' '}
+      <label>Load catalog file <input type="file" accept=".json,application/json" disabled={catalogBusy||busy} onChange={readCatalog}/></label>{' '}
+      <button type="button" disabled={!catalog||!ready||catalogBusy||busy} onClick={loadCatalogDraft}>Load selected page as draft</button>
+      <p role="status" style={{overflowWrap:'anywhere'}}>{catalogStatus}</p>
+    </details>
     <p role="status">{message}</p>
     {ready&&<fieldset disabled={busy} style={{border:0,padding:0,minWidth:0}}>
       {strip&&<section aria-label="StripaGram identity" style={{display:'grid',gap:8,marginBottom:16}}>
