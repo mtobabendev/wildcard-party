@@ -3,7 +3,7 @@ import { groupPrivateMedia, validCollectionLabel } from './mediaCollections.js'
 import './MemberArea.css'
 
 const AREAS = ['penny', 'kandy', 'ashley']
-const VIEWS = ['galleries', 'reels']
+const VIEWS = ['galleries', 'reels', 'music']
 // Page assets remain available by filename, but are not vault content.
 const PENNY_FRIEND_ASSETS = new Set(["KandyOnlyFans2.jpg","mia-slides.webp","brooke-slides.webp","aisha-moon-slides.webp","angel-jessy-slides.webp","lacie-heart-slides.webp","snow-bird-slides.webp","evemarie-slides.webp","karley-stokes-slides.webp"])
 
@@ -50,6 +50,7 @@ export default function MemberArea() {
   const [status, setStatus] = useState('checking')
   const [media, setMedia] = useState([])
   const [view, setView] = useState(initialView)
+  const [selectedSongId, setSelectedSongId] = useState('')
   const [retry, setRetry] = useState(0)
   const [viewer, setViewer] = useState(null)
   const [owner, setOwner] = useState(false)
@@ -201,6 +202,12 @@ export default function MemberArea() {
   const groups = status === 'approved' ? groupPrivateMedia(media, view).filter(group => !selectedCollection || group.name === selectedCollection) : []
   const photos = status === 'approved' ? media.filter(item => item?.type?.startsWith('image/')).length : 0
   const reels = status === 'approved' ? media.filter(item => item?.type?.startsWith('video/')).length : 0
+  const musicTracks = status === 'approved' && area === 'kandy' ? groupPrivateMedia(media, 'music').flatMap(group => group.items) : []
+  const songs = musicTracks.length
+  const currentTrackIndex = Math.max(0, musicTracks.findIndex(item => item.id === selectedSongId))
+  const currentTrack = musicTracks[currentTrackIndex] || null
+  const nextTrack = () => setSelectedSongId(musicTracks[(currentTrackIndex + 1) % musicTracks.length]?.id || '')
+  const previousTrack = () => setSelectedSongId(musicTracks[(currentTrackIndex - 1 + musicTracks.length) % musicTracks.length]?.id || '')
   const name = area ? area[0].toUpperCase() + area.slice(1) : 'WildCard'
   const current = viewer?.items?.[viewer.index]
   const galleries = [...new Set(['Private Archive', ...groupPrivateMedia(media, 'galleries').map(group => group.name)])]
@@ -234,16 +241,33 @@ export default function MemberArea() {
           <button type="button" aria-pressed={view === 'reels'} onClick={() => changeView('reels')}>
             ▶ Reels &amp; Videos <span>{reels}</span>
           </button>
+          {area === 'kandy' && <button type="button" aria-pressed={view === 'music'} onClick={() => changeView('music')}>
+            ♫ Music <span>{songs}</span>
+          </button>}
           <button className="vault__refresh" type="button" onClick={() => setRetry(value => value + 1)}>
             ↻ Refresh collection
           </button>
         </nav>}
+        {view === 'music' && area === 'kandy' && musicTracks.length > 0 && <section className="vault__music" aria-label="Kandy's music">
+          <header><h2>♫ Kandy's Music</h2><p>Original songs · WildCard DEV private stream · No Suno required</p></header>
+          <div className="vault__music-player">
+            <strong>{currentTrack?.title}</strong>
+            <audio key={currentTrack?.id} controls playsInline preload="metadata" src={currentTrack ? mediaSrc(currentTrack.id) : undefined} onEnded={nextTrack} aria-label={currentTrack?.title || 'Kandy music player'} />
+            <nav aria-label="Music playback"><button type="button" onClick={previousTrack} disabled={musicTracks.length < 2}>← Previous</button><span>{currentTrackIndex + 1} / {musicTracks.length}</span><button type="button" onClick={nextTrack} disabled={musicTracks.length < 2}>Next →</button></nav>
+          </div>
+          <ol className="vault__music-list">{musicTracks.map((track, index) => <li key={track.id}>
+            <button type="button" aria-current={currentTrack?.id === track.id ? 'true' : undefined} onClick={() => setSelectedSongId(track.id)}>
+              <span aria-hidden="true">{currentTrack?.id === track.id ? '♫' : String(index + 1).padStart(2,'0')}</span><span>{track.title}</span>
+            </button>
+          </li>)}</ol>
+        </section>}
         {groups.length === 0 && <p className="vault__empty">
           {view === 'galleries'
             ? 'No media is published in this gallery yet. New private gallery uploads appear here automatically.'
+            : view === 'music' ? 'No songs uploaded yet. Kandy\'s music will appear here after Owner upload.'
             : 'No videos are published here yet. New private video uploads appear here automatically.'}
         </p>}
-        {groups.map(group => <section className="vault__collection" key={group.name} aria-label={group.name}>
+        {view !== 'music' && groups.map(group => <section className="vault__collection" key={group.name} aria-label={group.name}>
           <h2>{group.name}</h2>
           <p>{group.items.length} {view === 'galleries' ? 'items' : 'clips'} · Tap to enlarge. Swipe or use arrows to browse.</p>
           <div className="vault__grid">

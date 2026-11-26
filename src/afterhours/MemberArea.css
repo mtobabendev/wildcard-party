@@ -50,3 +50,20 @@
 .vault--embedded .vault__shell { max-width: none; }
 .vault--embedded .vault__tabs { padding-top: 0; }
 .vault--embedded .vault__collection { margin-bottom: 1.5rem; }
+
+/* Kandy's private, same-origin WildCard music player. No public file URLs. */
+.vault__music { display:grid; gap: 1rem; min-width:0; margin: 1rem 0; padding: clamp(12px,3vw,20px); border:1px solid #b17ad5; border-radius:16px; background:linear-gradient(140deg,#2b153e,#100b1e); color:#fce9ff; }
+.vault__music > header h2 { margin:0 0 .35rem; font-size:clamp(1.25rem,4vw,1.8rem); }
+.vault__music > header p { margin:0; color:#e7c6ed; font-size:.9rem; }
+.vault__music-player { display:grid; gap:.75rem; padding:1rem; border-radius:12px; background:#160c25; }
+.vault__music-player strong { overflow-wrap:anywhere; font-size:1rem; }
+.vault__music-player audio { display:block; width:100%; min-width:0; }
+.vault__music-player nav { display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
+.vault__music-player button { min-height:40px; padding:.5rem .9rem; border:1px solid #b58add; border-radius:10px; background:#402252; color:#fff; cursor:pointer; }
+.vault__music-player button:disabled { opacity:.5; cursor:not-allowed; }
+.vault__music-list { display:grid; gap:.35rem; padding:0; margin:0; list-style:none; }
+.vault__music-list li { min-width:0; }
+.vault__music-list button { display:flex; align-items:center; gap:.8rem; width:100%; min-height:46px; padding:.65rem .75rem; border:1px solid #ac82c244; border-radius:9px; background:#2b183c; color:#f6eaf9; text-align:left; cursor:pointer; overflow-wrap:anywhere; }
+.vault__music-list button:hover, .vault__music-list button[aria-current="true"] { border-color:#d8a5ff; background:#5d2e75; }
+.vault__music-list button > span:first-child { flex:0 0 2rem; text-align:center; font-weight:800; color:#f5c2ff; }
+.vault__music button:focus-visible { outline:2px solid #fff; outline-offset:2px; }

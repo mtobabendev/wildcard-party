@@ -4,7 +4,7 @@ import { browserMediaType } from './ownerEditorRecovery.js'
 import { createCollectionName } from './mediaCollections.js'
 
 const AREAS = ['penny', 'kandy', 'ashley']
-const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'])
+const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'audio/mpeg'])
 const MAX_BYTES = 150 * 1024 * 1024
 const RELAY_MAX_BYTES = 2 * 1024 * 1024
 
@@ -68,7 +68,7 @@ export default function OwnerMedia() {
         const name = createCollectionName(chosenName, collection)
         setProgress((i + 1) + '/' + files.length + ': ' + chosenName)
         try {
-          if (!chosenName || !/^[^\\/\\\\\x00-\x1f\x7f]+$/.test(chosenName) || chosenName.length > 180 || !/\.(jpg|jpeg|png|webp|gif|mp4|webm)$/i.test(chosenName)) {
+          if (!chosenName || !/^[^\\/\\\\\x00-\x1f\x7f]+$/.test(chosenName) || chosenName.length > 180 || !/\.(jpg|jpeg|png|webp|gif|mp4|webm|mp3)$/i.test(chosenName)) {
             throw new Error('Enter a valid stored filename with its extension.')
           }
           if (!TYPES.has(contentType) || file.size < 1 || file.size > MAX_BYTES) {
@@ -158,7 +158,7 @@ export default function OwnerMedia() {
 
   return <><section id="private-media-upload" style={{ maxWidth: 920, margin: '16px auto', padding: 20, border: '1px solid #99688f', borderRadius: 16, background: '#22152c' }}>
     <h2>Private media vault</h2>
-    <p>Upload multiple private photos and videos directly from your phone or computer. Choose the area and collection once. Existing files are skipped; failed files remain selected for retry.</p>
+    <p>Upload private photos, videos, and MP3 songs directly from your phone or computer. Choose the area and collection once. Existing files are skipped; failed files remain selected for retry.</p>
     <form onSubmit={upload} style={{ display: 'grid', gap: 12 }}>
       <label>Area{' '}
         <select aria-label="Private media area" value={area} disabled={busy} onChange={e => setArea(e.target.value)}>
@@ -166,7 +166,7 @@ export default function OwnerMedia() {
         </select>
       </label>
       <label>Files (select multiple){' '}
-        <input aria-label="Choose private media" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm" multiple disabled={busy}
+        <input aria-label="Choose private media" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,.mp3,audio/mpeg" multiple disabled={busy}
           onChange={e => { const selected = Array.from(e.target.files || []); e.target.value = ''; setFiles(selected); setFileNames(selected.map(file => file.name)); setResults([]); setMessage('') }} />
       </label>
       <p role="status">{files.length} file(s) ready{busy ? ' — uploading...' : ''}</p>
