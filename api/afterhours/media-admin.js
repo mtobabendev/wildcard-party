@@ -2,7 +2,7 @@ import { currentAccount, databaseNotConfigured, sameOrigin } from '../../lib/aut
 import { isOwner } from '../../lib/penny-owner.js'
 import { validArea, validAccountId } from '../../lib/afterhours-access.js'
 import { validCollectionLabel } from '../../src/afterhours/mediaCollections.js'
-import { uploadLimit } from '../../lib/media-storage-routing.js'
+import { uploadLimit, newUploadProvider, storageProviderForKey } from '../../lib/media-storage-routing.js'
 import { decodeRelayBytes } from '../../lib/afterhours-upload-bytes.js'
 import { finishPrivateUpload, startPrivateUpload, privateMediaByName, validMediaSize, validMediaType } from '../../lib/afterhours-media.js'
 import { issueUploadToken, ownerFromUploadToken, revokeOwnerUploadTokens } from '../../lib/afterhours-agent-token.js'
@@ -94,7 +94,9 @@ export default async function handler(req, res) {
       }
       const existing = body.name ? await privateMediaByName(area, body.name) : null
       return res.status(200).json({
-        ok: true, area, exists: Boolean(existing), type: existing?.content_type || null
+        ok: true, area, exists: Boolean(existing), type: existing?.content_type || null,
+        uploadProvider: newUploadProvider(),
+        storageProvider: existing ? storageProviderForKey(existing.storage_key) : null
       })
     }
     if (body.action === 'relay') {

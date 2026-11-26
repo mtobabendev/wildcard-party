@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { groupPrivateMedia, validCollectionLabel } from './mediaCollections.js'
+import { fetchPrivateMediaPages } from './privateMediaPages.js'
 import './MemberArea.css'
 
 const AREAS = ['penny', 'kandy', 'ashley']
@@ -64,6 +65,7 @@ export default function MemberArea() {
   useEffect(() => {
     if (!AREAS.includes(area)) { setStatus('invalid'); setMedia([]); return undefined }
     let cancelled = false
+    const controller = new AbortController()
     async function check() {
       setStatus('checking')
       setMedia([])
@@ -78,13 +80,9 @@ export default function MemberArea() {
         }
         const membership = await access.json()
         if (!cancelled) setOwner(membership.owner === true)
-        const response = await fetch('/api/afterhours/media?area=' + area, {
-          credentials: 'same-origin', cache: 'no-store',
-        })
-        if (!response.ok) throw new Error('Private media service unavailable')
-        const result = await response.json()
+        const items = await fetchPrivateMediaPages(area, { signal: controller.signal })
         if (!cancelled) {
-          setMedia(Array.isArray(result.media) ? result.media.filter(item => area !== 'penny' || !PENNY_FRIEND_ASSETS.has(item?.name)) : [])
+          setMedia(items.filter(item => area !== 'penny' || !PENNY_FRIEND_ASSETS.has(item?.name)))
           setStatus('approved')
         }
       } catch {
@@ -92,7 +90,7 @@ export default function MemberArea() {
       }
     }
     check()
-    return () => { cancelled = true }
+    return () => { cancelled = true; controller.abort() }
   }, [area, retry])
 
   useEffect(() => {

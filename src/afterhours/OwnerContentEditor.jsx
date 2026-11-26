@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { mergeCreatorDraft } from './ownerEditorRecovery.js'
+import { fetchPrivateMediaPages } from './privateMediaPages.js'
 import { emptyContent, emptyOrbitCards } from './contentModel.js'
 import { STRIPAGRAM_POST_DEFAULTS } from './stripagramModel.js'
 import { BUILTIN_POSTS } from './builtinPosts.js'
@@ -39,8 +40,7 @@ export default function OwnerContentEditor({ mediaRevision = 0 }) {
     if(!ready)return
     const controller=new AbortController()
     setMediaStatus('Refreshing media…')
-    fetch('/api/afterhours/media?area='+encodeURIComponent(area),{credentials:'same-origin',cache:'no-store',signal:controller.signal})
-      .then(async r=>{const d=await r.json();if(!r.ok||!Array.isArray(d.media))throw Error(d.error||'Media refresh failed');return d.media})
+    fetchPrivateMediaPages(area, { signal: controller.signal })
       .then(items=>{if(!controller.signal.aborted){setMedia(items);setMediaStatus(items.length+' available media items')}})
       .catch(e=>{if(!controller.signal.aborted)setMediaStatus('Media refresh failed: '+e.message)})
     return ()=>controller.abort()

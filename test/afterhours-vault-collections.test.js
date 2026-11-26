@@ -31,8 +31,12 @@ test('galleries mix photos and videos while reels remain video-only without expo
 test('member gallery fetches through existing authorized APIs and hides all media until approved', () => {
   const view = readFileSync(new URL('../src/afterhours/MemberArea.jsx', import.meta.url), 'utf8')
   const owner = readFileSync(new URL('../src/afterhours/OwnerMedia.jsx', import.meta.url), 'utf8')
+  const paging = readFileSync(new URL('../src/afterhours/privateMediaPages.js', import.meta.url), 'utf8')
   assert.match(view, /fetch\('\/api\/afterhours\/access\?area='/)
-  assert.match(view, /fetch\('\/api\/afterhours\/media\?area='/)
+  assert.match(view, /fetchPrivateMediaPages\(area/)
+  assert.match(paging, /\/api\/afterhours\/media\?area=/)
+  assert.match(paging, /credentials: 'same-origin'/)
+  assert.match(paging, /cache: 'no-store'/)
   assert.match(view, /status === 'approved' && <>/)
   assert.match(view, /status === 'approved' && current/)
   assert.match(view, /cache: 'no-store'/)
