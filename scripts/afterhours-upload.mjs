@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 
 const API = 'https://party.wildcarddev.com/api/afterhours/media-admin'
 const TYPES = { '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png',
-  '.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.webm':'video/webm' }
+  '.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.webm':'video/webm','.mp3':'audio/mpeg' }
 
 export function parseArgs(argv) {
   const args = { mode:'check', area:'penny', file:'', name:'', newVersion:false }

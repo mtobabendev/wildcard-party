@@ -28,7 +28,8 @@ export function mergeCreatorDraft(base,draft,latest) {
 }
 export function browserMediaType(type,name) {
   const reported=String(type||'').toLowerCase()
-  if(reported && reported!=='application/octet-stream')return reported
   const ext=String(name||'').toLowerCase().split('.').pop()
-  return ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',mp4:'video/mp4',webm:'video/webm'})[ext]||''
+  if (ext==='mp3' && (!reported || ['audio/mpeg','audio/mp3','audio/x-mpeg','application/octet-stream'].includes(reported))) return 'audio/mpeg'
+  if(reported && reported!=='application/octet-stream')return reported
+  return ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',mp4:'video/mp4',webm:'video/webm',mp3:'audio/mpeg'})[ext]||''
 }

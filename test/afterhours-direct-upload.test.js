@@ -36,6 +36,7 @@ test('uploader validates area, filenames and explicit upload intent', () => {
   assert.throws(()=>parseArgs(['--unknown','x']), /Unknown option/)
   assert.equal(mimeOf('x.webp'), 'image/webp')
   assert.equal(mimeOf('x.webm'), 'video/webm')
+  assert.equal(mimeOf('Kandy Song.mp3'), 'audio/mpeg')
   assert.equal(mimeOf('x.html'), '')
 })
 
