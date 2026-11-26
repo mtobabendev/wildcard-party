@@ -38,11 +38,14 @@ export default function Messenger({ embedded = false, onStatus } = {}) {
     setBusy(true)
     setError('')
     try {
-      const payload = await request('/api/auth/login', {
+      const login = request('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handle, password }),
       })
+      const payload = window.WildCardLoader?.track
+        ? await window.WildCardLoader.track(login, { label: 'Signing in to WildCard Messenger…' })
+        : await login
       if (!payload.account?.id) throw new Error('Account was not returned.')
       setAccount(payload.account)
       onStatus?.(0, true)

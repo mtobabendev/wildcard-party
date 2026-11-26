@@ -50,7 +50,12 @@ export default function OwnerAccess() {
   async function perform(body, message) {
     setBusy(true); setError(''); setNotice('')
     try {
-      await request('POST', body)
+      const pending = request('POST', body)
+      if (window.WildCardLoader?.track) {
+        await window.WildCardLoader.track(pending, { label: 'Updating member access…' })
+      } else {
+        await pending
+      }
       setNotice(message)
       await refresh()
       return true
