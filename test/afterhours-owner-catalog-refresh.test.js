@@ -10,7 +10,8 @@ test('successful upload batches invalidate the owner catalog',()=>{
 test('catalog refresh preserves the current draft and revision',()=>{
  const editor=read('src/afterhours/OwnerContentEditor.jsx')
  const refresh=editor.slice(editor.indexOf('// Refresh only the catalog'),editor.indexOf('  function edit(fn)'))
- assert.match(refresh,/\/api\/afterhours\/media\?area=/)
+ assert.match(refresh,/fetchPrivateMediaPages\(area/)
+ assert.match(read('src/afterhours/privateMediaPages.js'),/\/api\/afterhours\/media\?area=/)
  assert.match(refresh,/setMedia\(items\)/)
  assert.match(refresh,/\[area,ready,mediaRevision,mediaRefresh\]/)
  assert.doesNotMatch(refresh,/setContent\(|setRevision\(|setDirty\(/)

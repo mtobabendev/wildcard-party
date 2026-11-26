@@ -1,12 +1,12 @@
 import { currentAccount, sameOrigin } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
 import { hasAreaGrant, validArea } from '../../lib/afterhours-access.js'
-import { listPrivateMedia } from '../../lib/afterhours-media.js'
+import { listAllPrivateMedia } from '../../lib/afterhours-media.js'
 import { readContent, saveContent, readStripagram, saveStripagram } from '../../lib/creator-content.js'
 import { normalizeContent, contentMediaValid } from '../../src/afterhours/contentModel.js'
 import { normalizeStripagram } from '../../src/afterhours/stripagramModel.js'
 const READ_ORIGINS=new Set(['https://wildcarddev.com','https://www.wildcarddev.com'])
-export function createContentHandler({account=currentAccount,owner=isOwner,grant=hasAreaGrant,list=listPrivateMedia,read=readContent,save=saveContent,stripRead=readStripagram,stripSave=saveStripagram}={}) {
+export function createContentHandler({account=currentAccount,owner=isOwner,grant=hasAreaGrant,list=listAllPrivateMedia,read=readContent,save=saveContent,stripRead=readStripagram,stripSave=saveStripagram}={}) {
  return async function handler(req,res) {
   res.setHeader('Cache-Control','private, no-store')
   res.setHeader('X-Content-Type-Options','nosniff')

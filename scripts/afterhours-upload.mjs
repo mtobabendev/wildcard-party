@@ -56,6 +56,8 @@ export async function run(argv, { token = process.env.WCD_UPLOAD_TOKEN,
   if (args.mode === 'check') {
     output('Party upload connection VERIFIED; area: ' + args.area)
     if (args.name) output(current.exists ? 'Existing ready asset: ' + args.name : 'Not present: ' + args.name)
+    if (current.uploadProvider) output('New upload provider: ' + current.uploadProvider)
+    if (current.storageProvider) output('Stored object provider: ' + current.storageProvider)
     return { checked:true, exists:current.exists }
   }
   if (current.exists && !args.newVersion) {
@@ -64,6 +66,9 @@ export async function run(argv, { token = process.env.WCD_UPLOAD_TOKEN,
   }
   const type = mimeOf(args.name)
   if (!type) throw new Error('Unsupported file type.')
+  if (type === 'audio/mpeg' && current.uploadProvider !== 'supabase') {
+    throw new Error('Owner music uploads require the Supabase storage provider.')
+  }
   const info = await stat(args.file)
   if (!info.isFile() || info.size < 1 || info.size > 150 * 1024 * 1024) throw new Error('Invalid file size.')
   const bytes = await readFile(args.file)

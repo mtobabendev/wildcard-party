@@ -2,6 +2,7 @@ import { currentAccount, databaseNotConfigured } from '../../lib/auth-db.js'
 import { isOwner } from '../../lib/penny-owner.js'
 import { hasAreaGrant, validAccountId, validArea } from '../../lib/afterhours-access.js'
 import { listPrivateMedia, privateMediaDownload, privateMediaByName, signedPrivateMediaUrl } from '../../lib/afterhours-media.js'
+import { parseMediaPage, nextMediaPage } from '../../lib/media-paging.js'
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'private, no-store')
@@ -14,6 +15,10 @@ export default async function handler(req, res) {
   const mediaId = req.query?.id
   const name = req.query?.name
   const area = validArea(req.query?.area)
+  const page = parseMediaPage(req.query?.page)
+  if (page === null || (req.query?.page != null && (mediaId != null || name != null))) {
+    return res.status(400).json({ error: 'Invalid media page.' })
+  }
   if ((mediaId != null && (name != null || !validAccountId(mediaId))) ||
       (name != null && (!area || typeof name !== 'string' || name.length < 1 || name.length > 180)) ||
       (mediaId == null && !area)) {
@@ -43,7 +48,8 @@ export default async function handler(req, res) {
       res.setHeader('Location', await signedPrivateMediaUrl(item))
       return res.end()
     }
-    return res.status(200).json({ area, media: await listPrivateMedia(area) })
+    const media = await listPrivateMedia(area, page)
+    return res.status(200).json({ area, media, nextPage: nextMediaPage(page, media.length) })
   } catch (error) {
     if (databaseNotConfigured(error) || error?.code === 'STORAGE_NOT_CONFIGURED') {
       return res.status(503).json({ error: 'Private media service unavailable.' })
