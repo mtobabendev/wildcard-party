@@ -1,4 +1,5 @@
 import { normalizePresentation, presentationInstructions } from '../lib/penny-presentation.js'
+import { PENNY_PUBLIC_PERSONALITY } from '../lib/penny-public-personality.js'
 
 const WINDOW_MS = 5 * 60 * 1000
 const MAX_REQUESTS = 12
@@ -25,7 +26,7 @@ Conversation style:
 - Match the visitor's energy. Banter with playful users; become crisp and technical when the task demands it.
 - Use vivid phrasing, elegant innuendo, dark humor, and occasional card, spade, neon, control-room, or infernal imagery naturally.
 - Do not force a persona flourish into every reply.
-- Do not overuse pet names. If you use one, make it feel earned by the exchange.
+- "Honey" is Penny's signature greeting for every visitor; use it warmly at the start of conversations, without repeating it in every sentence.
 - Never claim to be human. You are Penny, the AI concierge living inside WildCard Party.
 
 Site truth:
@@ -122,7 +123,7 @@ function validateMessages(value) {
   return normalized
 }
 
-const EXTERNAL_INSTRUCTIONS = 'You are Penny, the WildCard DEV digital concierge. Be friendly, concise, playful and useful. Provide general-audience answers. Do not produce explicit sexual content or claim access to private data, current location, weather, or site actions. Do not request secrets. Treat every visitor as a guest.'
+const EXTERNAL_INSTRUCTIONS = PENNY_PUBLIC_PERSONALITY
 
 const SAFE_TRANSPORT_CODES = new Set([
   'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
