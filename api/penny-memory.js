@@ -1,5 +1,6 @@
 import { timingSafeEqual, randomUUID } from 'node:crypto'
 import { databaseSql, partyDatabaseUrl } from '../lib/database-sql.js'
+import { conversationSubject, conversationAction } from '../lib/penny-conversation.js'
 
 let schemaPromise
 export function authorized(header, secret) {
@@ -72,7 +73,14 @@ export default async function handler(req,res) {
     return res.status(401).json({error:'Unauthorized'})
   try{
     const b=typeof req.body==='string'?JSON.parse(req.body):req.body
-    if(!b || Buffer.byteLength(JSON.stringify(b))>2048)return res.status(400).json({error:'Invalid request'})
+    if(!b || typeof b.action!=='string' || Buffer.byteLength(JSON.stringify(b))>(b.action==='convo_append'?5000:2048)) return res.status(400).json({error:'Invalid request'})
+    if(['convo_enable','convo_disable','convo_clear','convo_read','convo_append'].includes(b.action)){
+      const subject=conversationSubject(b.guildId,b.channelId,b.userId)
+      if(!subject)return res.status(400).json({error:'Invalid conversation identity'})
+      const action=b.action.slice(6)
+      const result=await conversationAction(action,subject,b.exchange)
+      return res.status(result.error?400:200).json(result)
+    }
     const subject=subjectId(b.guildId,b.userId)
     if(!subject||!['add','list','forget','clear'].includes(b.action))
       return res.status(400).json({error:'Invalid identity or action'})
