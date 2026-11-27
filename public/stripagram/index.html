@@ -17,6 +17,13 @@
 .profile-top.is-avatar-expanded .profile-avatar-toggle{width:min(100%,320px);cursor:zoom-out}
 .profile-top.is-avatar-expanded .profile-avatar-toggle .ring{width:100%;height:auto;aspect-ratio:1}
 @media(prefers-reduced-motion:reduce){.profile-avatar-toggle .ring{transition:none}}
+
+/* Keep the shared concierge clear of Stripagram's fixed mobile navigation. */
+@media(max-width:600px){
+  :root{--stripagram-mobile-nav-height:calc(72px + env(safe-area-inset-bottom,0px))}
+  wildcard-ask-penny{bottom:calc(var(--stripagram-mobile-nav-height) + 8px)}
+  .layout{padding-bottom:calc(var(--stripagram-mobile-nav-height) + 88px)}
+}
 </style>
 </head>
 <body>
@@ -83,6 +90,18 @@ async function loadManaged(){
  if(managed.size){for(const e of document.querySelectorAll('[data-side-person]')){const who=e.dataset.sidePerson,p=people[who];if(!managed.has(who))continue;const details=node('div');details.append(node('strong','',p.name),node('small','','@'+p.handle+' · '+p.role));e.replaceChildren(ring(who),details)}renderStories();render()}
 }
 loadManaged();
+})();
+</script>
+
+<script>
+(() => {
+  const nav = document.getElementById('bottom');
+  if (!nav || typeof ResizeObserver !== 'function') return;
+  new ResizeObserver(() => {
+    const height = nav.getBoundingClientRect().height;
+    if (height > 0) document.documentElement.style.setProperty('--stripagram-mobile-nav-height', height + 'px');
+    else document.documentElement.style.removeProperty('--stripagram-mobile-nav-height');
+  }).observe(nav);
 })();
 </script>
 <script defer src="https://www.wildcarddev.com/static/ask-penny.js"></script>
