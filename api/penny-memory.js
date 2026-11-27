@@ -9,11 +9,11 @@ export function authorized(header, secret) {
   return actual.length === expected.length && timingSafeEqual(actual,expected)
 }
 export function subjectId(guild,user) {
-  return /^\\d{17,20}$/.test(guild||'') && /^\\d{17,20}$/.test(user||'') ? 'discord:'+guild+':'+user : ''
+  return /^\d{17,20}$/.test(guild||'') && /^\d{17,20}$/.test(user||'') ? 'discord:'+guild+':'+user : ''
 }
 export function normalizeNote(value) {
   if(typeof value!=='string') return ''
-  const note=value.trim().replace(/\\s+/g,' ')
+  const note=value.trim().replace(/\s+/g,' ')
   return note.length>=2 && note.length<=500 ? note : ''
 }
 async function store() {
@@ -22,12 +22,12 @@ async function store() {
   const sql=databaseSql(url)
   if(!schemaPromise) {
     schemaPromise=(async()=>{
-      await sql\`CREATE TABLE IF NOT EXISTS penny_public_notes (
+      await sql`CREATE TABLE IF NOT EXISTS penny_public_notes (
         id uuid PRIMARY KEY, subject varchar(100) NOT NULL, note varchar(500) NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(subject,note)
-      )\`
-      await sql\`CREATE INDEX IF NOT EXISTS penny_public_notes_subject_idx
-        ON penny_public_notes(subject,created_at)\`
+      )`
+      await sql`CREATE INDEX IF NOT EXISTS penny_public_notes_subject_idx
+        ON penny_public_notes(subject,created_at)`
     })().catch(err=>{schemaPromise=undefined;throw err})
   }
   await schemaPromise
@@ -36,16 +36,16 @@ async function store() {
 export async function act(action,subject,note,id) {
   const sql=await store()
   if(action==='list'){
-    return {items:await sql\`SELECT id::text AS id,note FROM penny_public_notes
-      WHERE subject=\${subject} ORDER BY created_at,id LIMIT 20\`}
+    return {items:await sql`SELECT id::text AS id,note FROM penny_public_notes
+      WHERE subject=${subject} ORDER BY created_at,id LIMIT 20`}
   }
   if(action==='add'){
     const clean=normalizeNote(note)
     if(!clean) return {error:'Invalid memory'}
-    const rows=await sql\`INSERT INTO penny_public_notes(id,subject,note)
-      SELECT \${randomUUID()}::uuid,\${subject},\${clean}
-      WHERE (SELECT count(*) FROM penny_public_notes WHERE subject=\${subject}) < 20
-      ON CONFLICT(subject,note) DO NOTHING RETURNING id\`
+    const rows=await sql`INSERT INTO penny_public_notes(id,subject,note)
+      SELECT ${randomUUID()}::uuid,${subject},${clean}
+      WHERE (SELECT count(*) FROM penny_public_notes WHERE subject=${subject}) < 20
+      ON CONFLICT(subject,note) DO NOTHING RETURNING id`
     if(!rows.length){
       const current=await act('list',subject)
       if(!current.items.some(x=>x.note===clean))return {error:'Memory is full (20 notes). Forget one first.'}
@@ -53,13 +53,13 @@ export async function act(action,subject,note,id) {
     return {saved:true}
   }
   if(action==='clear'){
-    await sql\`DELETE FROM penny_public_notes WHERE subject=\${subject}\`
+    await sql`DELETE FROM penny_public_notes WHERE subject=${subject}`
     return {cleared:true}
   }
   if(action==='forget'){
     if(!/^[0-9a-f-]{36}$/i.test(id||''))return {error:'Invalid note ID'}
-    const rows=await sql\`DELETE FROM penny_public_notes
-      WHERE subject=\${subject} AND id=\${id}::uuid RETURNING id\`
+    const rows=await sql`DELETE FROM penny_public_notes
+      WHERE subject=${subject} AND id=${id}::uuid RETURNING id`
     return {deleted:rows.length}
   }
   return {error:'Invalid action'}
